@@ -1,0 +1,26 @@
+# تنظیمات دیپلوی. فقط `id` پایین را با شناسه‌ی KV خودت عوض کن (راهنما در README).
+name = "alert"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# هر دقیقه قیمت‌ها چک می‌شود
+[triggers]
+crons = ["* * * * *"]
+
+# KV (آلارم‌ها و حساب کاربری اینجا ذخیره می‌شوند)
+[[kv_namespaces]]
+binding = "ALERTS_KV"
+id = "PUT_YOUR_KV_NAMESPACE_ID_HERE"
+
+# (اختیاری، پیشنهادی) دیتابیس D1: سقف نوشتن رایگان حدود ۱۰۰ برابر KV است.
+# ۱) npx wrangler d1 create alert-db   ۲) شناسه‌ی چاپ‌شده را پایین بگذار ۳) # اول این چهار خط را بردار.
+# داده‌های قبلی از KV خودکار منتقل می‌شوند.
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "alert-db"
+# database_id = "PUT_YOUR_D1_DATABASE_ID_HERE"
+
+# اختیاری (فقط اگر خواستی، # اول خط‌ها را بردار):
+# [vars]
+# OWNER_EMAIL = "you@example.com"      # فقط همین ایمیل بتواند ثبت‌نام کند
+# EMAIL_FROM  = "Alerts <alerts@yourdomain.com>"
