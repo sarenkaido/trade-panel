@@ -153,8 +153,9 @@ npx wrangler deploy
 |---|---|
 | **Ethereum** و **BNB Chain** (BSC) | `0x92D262062d36688261032051b2B9Ae08F3644b89` |
 | **Solana** | `4oWwKYuiEfaTWvTPu3isGSqHtsKydTy5oLD3qo5PRpKR` |
+| **Tron** (TRX / USDT-TRC20) | `TCbk4NGW57Wiy6YJXQmx1pPV2hsw1SQndY` |
 
-> ⚠️ فقط روی همون شبکه‌ی نوشته‌شده بفرست (مثلاً آدرس بالا برای Ethereum و BNB Chain یکسانه ولی Solana جداست). قبل از ارسال، آدرس رو با همین صفحه‌ی گیت‌هاب دوباره تطبیق بده.
+> ⚠️ فقط روی همون شبکه‌ی نوشته‌شده بفرست (مثلاً یک آدرس برای Ethereum و BNB Chain مشترکه ولی Solana و Tron هرکدوم جدان). قبل از ارسال، آدرس رو با همین صفحه‌ی گیت‌هاب دوباره تطبیق بده.
 
 ⭐ اگه نمی‌خوای پولی بدی، ستاره‌ی ریپو (Star) و معرفی به دوستان هم همون‌قدر ارزش داره.
 
@@ -168,5 +169,6 @@ Free, open source (MIT) and runs on **your own** infrastructure — no central s
 |---|---|
 | **Ethereum** & **BNB Chain** (BSC) | `0x92D262062d36688261032051b2B9Ae08F3644b89` |
 | **Solana** | `4oWwKYuiEfaTWvTPu3isGSqHtsKydTy5oLD3qo5PRpKR` |
+| **Tron** (TRX / USDT-TRC20) | `TCbk4NGW57Wiy6YJXQmx1pPV2hsw1SQndY` |
 
 > ⚠️ Send only on the listed network, and double-check the address against this page before sending. A ⭐ star on the repo is just as appreciated.
