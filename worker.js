@@ -379,7 +379,7 @@ async function heartbeat(env, err) {
     const prev = await kvGetJSON(env, "last_cron", {});
     const now = Date.now(), m = _lastInfo.missing.join(","), age = now - (prev.t || 0);
     if (!prev.t || age > 300000 || ((m !== (prev.m || "") || err !== (prev.e || "")) && age > 180000)) {
-      await kvSetJSON(env, "last_cron", { t: now, p: _lastInfo.pending, m, e: err });
+      await kvSetJSON(env, "last_cron", { t: now, p: _lastInfo.pending, m, e: err, n: prev.n });
     }
   } catch (e) { /* diagnostics must never break the check */ }
 }
@@ -417,28 +417,52 @@ async function runScheduledCheck(env) {
       if (note) { md.push(">" + esc("📝 " + note)); plain.push("📝 " + note); }
       md.push(LINE, "*" + esc(head) + "*", ...rows.map(([k, v]) => esc(k) + code(v)));
       plain.push(LINE, head, ...rows.map(([k, v]) => k + v));
-      return { md: md.join("\n"), plain: plain.join("\n"), ch: a.ch || ["tg"], subject: head + " — " + who };
+      return { md: md.join("\n"), plain: plain.join("\n"), ch: a.ch || ["tg"], subject: head + " — " + who, aid: a.id, tid: t.id || 0 };
     });
     const tgBlocks = blocks.filter((x) => x.ch.includes("tg")), emBlocks = blocks.filter((x) => x.ch.includes("email"));
     // If Telegram rejects the formatting, resend as plain text so an alert is never lost.
     const send = async (md, plain) => {
+      let ok = false, err = "";
       for (const chat of chats) {
-        const r = await apiCall(env, "sendMessage", { chat_id: chat, text: md, parse_mode: "MarkdownV2" }, tok);
-        if (!r.ok) await apiCall(env, "sendMessage", { chat_id: chat, text: plain }, tok);
+        let r = await apiCall(env, "sendMessage", { chat_id: chat, text: md, parse_mode: "MarkdownV2" }, tok);
+        if (!r.ok) r = await apiCall(env, "sendMessage", { chat_id: chat, text: plain }, tok);
+        if (r.ok) ok = true; else err = String(r.description || r.error || "unknown").slice(0, 80);
       }
+      return { ok, err };
     };
     // Free plan allows 50 subrequests per run, so bursts are combined into a few messages.
+    // A group whose Telegram message could not be delivered is NOT marked as triggered: it is retried on a later tick.
     const SEP = "\n\n──────────\n\n";
-    if (!chats.length) console.log("[notify] no Telegram bot connected");
-    else if (tgBlocks.length <= 3) {
-      for (const bl of tgBlocks) await send(bl.md, bl.plain);
+    const failed = [];
+    let notifyErr = "";
+    const sendGroup = async (grp) => {
+      const r = await send(grp.map((x) => x.md).join(SEP), grp.map((x) => x.plain).join(SEP));
+      if (!r.ok) { notifyErr = r.err || notifyErr; failed.push(...grp); }
+    };
+    if (!chats.length) {
+      console.log("[notify] no Telegram bot connected");
+      if (tgBlocks.length) { notifyErr = "ربات تلگرام وصل نیست"; failed.push(...tgBlocks); }
+    } else if (tgBlocks.length <= 3) {
+      for (const bl of tgBlocks) await sendGroup([bl]);
     } else {
-      let md = "", plain = "";
+      let grp = [], len = 0;
       for (const bl of tgBlocks) {
-        if (md && md.length + bl.md.length > 3300) { await send(md, plain); md = ""; plain = ""; }
-        md += (md ? SEP : "") + bl.md; plain += (plain ? SEP : "") + bl.plain;
+        if (grp.length && len + bl.md.length > 3300) { await sendGroup(grp); grp = []; len = 0; }
+        grp.push(bl); len += bl.md.length;
       }
-      if (md) await send(md, plain);
+      if (grp.length) await sendGroup(grp);
+    }
+    if (tgBlocks.length) {
+      const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+      if (failed.length) {
+        for (const a of fresh.alerts || []) {
+          const tids = failed.filter((f) => f.aid === a.id).map((f) => f.tid);
+          if (tids.length) a.triggered = (a.triggered || []).filter((x) => !tids.includes(x));
+        }
+        await kvSetJSON(env, "alerts", fresh);
+      }
+      const lc = await kvGetJSON(env, "last_cron", {});
+      await kvSetJSON(env, "last_cron", { ...lc, n: { t: Date.now(), ok: failed.length === 0, e: notifyErr } });
     }
     if (emBlocks.length) {
       const sett = await kvGetJSON(env, "settings", {});
@@ -1039,7 +1063,7 @@ async function handleApi(request, env, url) {
   }
   if (M === "GET" && p === "/api/status") {
     const d = await kvGetJSON(env, "last_cron", {});
-    return jsonRes({ t: d.t || 0, p: d.p || 0, m: d.m || "", e: d.e || "", now: Date.now(), s: env.DB ? "D1" : "KV" });
+    return jsonRes({ t: d.t || 0, p: d.p || 0, m: d.m || "", e: d.e || "", n: d.n || null, now: Date.now(), s: env.DB ? "D1" : "KV" });
   }
   if (M === "POST" && p === "/api/alerts/reorder") {
     const ids = ((await body()).ids || []).map(Number);
@@ -1210,6 +1234,7 @@ body.selmode .card{cursor:pointer}
 .stext{padding:11px 15px 13px;font-size:13.5px;line-height:2;color:var(--tx2);white-space:pre-wrap;word-break:break-word;
   border-top:1px solid var(--line);max-height:320px;overflow:auto}
 .sst{margin:6px 0 10px}
+.stn{font-size:12.5px;color:var(--mut);line-height:1.9;margin:4px 0 6px}.stn div{padding:3px 0;border-top:1px solid var(--line)}.stn .bad{color:var(--short)}.stn .ok{color:var(--long)}
 .sp{display:none}.sp.on{display:block}
 .sg{border-bottom:1px solid var(--line);padding:0 0 12px;margin:0 0 12px}
 .sp .sg:last-of-type{border-bottom:0;margin-bottom:6px}
@@ -1657,6 +1682,7 @@ html[dir=ltr] .tb button.on{box-shadow:inset 0 -2px 0 var(--acc)}
 <div class="sp" data-p="l">
 <div class="sg">
 <div class="st" id="st" style="margin:0 0 2px">…</div>
+<div id="stn" class="stn"></div>
 <button class="lk" id="logr">تازه‌سازی</button>
 </div>
 </div>
@@ -1718,6 +1744,10 @@ const nz=s=>s.replace(/\u200c/g,'').replace(/\s+/g,' ').trim();
 const PAT=[
  [/^سایز پوزیشن \((.+) \$\) بیشتر از سرمایه است\.$/,m=>'Position size ('+m[1]+' $) is larger than the account balance.'],
  [/^✅ همه چیز سالم است — (?:(\d+) آلارم فعال زیر نظر است|آلارم فعالی نیست) · آخرین چک: (چند ثانیه|\d+) ?(?:دقیقه)? پیش$/,m=>'✅ All good — '+(m[1]?m[1]+' active alerts being watched':'no active alerts')+' · last check: '+(m[2]==='چند ثانیه'?'a few seconds':m[2]+' min')+' ago'],
+ [/^📨 آخرین پیام آلارم: ✓ ارسال شد \((چند ثانیه|\d+ دقیقه) پیش\)$/,m=>'📨 Last alert message: ✓ sent ('+(m[1]==='چند ثانیه'?'a few seconds':m[1].replace(' دقیقه',' min'))+' ago)'],
+ [/^📨 آخرین پیام آلارم: ⚠️ ارسال نشد — (.*) \((چند ثانیه|\d+ دقیقه) پیش\) — دوباره تلاش میشود$/,m=>'📨 Last alert message: ⚠️ not delivered — '+(m[1]==='ربات تلگرام وصل نیست'?'Telegram bot is not connected':m[1]==='نامشخص'?'unknown':m[1])+' ('+(m[2]==='چند ثانیه'?'a few seconds':m[2].replace(' دقیقه',' min'))+' ago) — will retry'],
+ [/^📍 (.+): قیمت گرفته نمیشود$/,m=>'📍 '+m[1]+': price unavailable'],
+ [/^📍 (.+): قیمت الان (.+) · نزدیکترین هدف (.+) \((.+)٪ فاصله\)$/,m=>'📍 '+m[1]+': price now '+m[2]+' · nearest target '+m[3]+' ('+m[4]+'% away)'],
  [/^⚠️ آخرین چک خودکار (\d+) دقیقه پیش بوده — Cron Trigger را چک کن$/,m=>'⚠️ Last automatic check was '+m[1]+' min ago — check the Cron Trigger'],
  [/^(✓ چک خودکار فعال|⚠️ خطا در چک: .*?) \(آخرین ثبت: (چند ثانیه|\d+) ?(?:دقیقه)? پیش\)(?: — قیمت این کوین‌ها گرفته نمی‌شود: (.*))?$/,m=>(m[1][0]==='✓'?'✓ Automatic check active':'⚠️ Check error: '+m[1].slice(13))+' (last run: '+(m[2]==='چند ثانیه'?'a few seconds':m[2]+' min')+' ago)'+(m[3]?' — prices unavailable for: '+m[3]:'')],
  [/^ربات @(\S+) ثبت شد — منتظر اتصال چت$/,m=>'Bot @'+m[1]+' registered — waiting for the chat to connect'],
@@ -2086,7 +2116,15 @@ async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=
  const m=Math.round((r.now-r.t)/60000);
  if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
  else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
- else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+ else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
+async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
+ if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
+ const act=alerts.filter(a=>!doneA(a));if(!act.length)return;const cs=[...new Set(act.map(a=>a.coin))];
+ try{prices=await api('GET','/api/prices?coins='+cs.join(','))}catch(e){}
+ act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
+  const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
+  add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
 $('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
 async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
 markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
