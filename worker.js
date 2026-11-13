@@ -13,8 +13,23 @@
 const STOCK_TICKERS = new Set([
   "AAPL","TSLA","NVDA","GOOGL","GOOG","MSFT","AMZN","AMD","META","NFLX",
   "SPX","SPXL","BRK","JPM","V","DIS","PYPL","COIN","SQ","PLTR","SOFI",
-  "NIO","XPEV","LI",
+  "NIO","XPEV","LI","MSTR","BABA","INTC","UBER","ORCL","CRM","ADBE","QCOM","AVGO","MU","TSM","ASML",
+  "BA","KO","PEP","WMT","NKE","MCD","XOM","CVX","PFE","JNJ","UNH","HOOD","RBLX","SHOP","SNAP","ABNB",
+  "MARA","RIOT","CRCL","GME","AMC","SPY","QQQ","IWM",
 ]);
+
+// "AMZN", "amznusdt", "AMZNUSDT.P" -> { base: "AMZN", perp: true }. Stocks (and anything written with .P) are perpetual-futures symbols.
+function splitCoin(raw) {
+  const c = String(raw || "").toUpperCase().replace(/[\s\/_-]/g, "");
+  const m = /^([A-Z0-9]{1,12}?)(?:USDT)?(\.P)?$/.exec(c);
+  if (!m) return null;
+  return { base: m[1], perp: !!m[2] || STOCK_TICKERS.has(m[1]) };
+}
+// What gets stored: stocks automatically get the USDT.P suffix (the format exchanges list them in).
+function normalizeCoin(raw) {
+  const x = splitCoin(raw);
+  return x ? x.base + (x.perp ? "USDT.P" : "") : "";
+}
 
 
 async function apiCall(env, method, params, token) {
@@ -109,17 +124,32 @@ async function kvSetJSON(env, key, val) {
 
 const PRICE_FETCH_TIMEOUT_MS = 3500;
 
-async function getBybit(ticker) {
-  try {
-    const res = await fetch(
-      `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${ticker}USDT`,
-      { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(PRICE_FETCH_TIMEOUT_MS) }
-    );
-    const d = await res.json();
-    const items = d?.result?.list;
-    if (items && items[0] && items[0].lastPrice) return parseFloat(items[0].lastPrice);
-  } catch (e) { /* ignore */ }
-  return null;
+// Perpetual-futures price (stocks are listed there as e.g. AMZNUSDT / AMZN_USDT, shown as AMZNUSDT.P). Same strategy as spot: last working exchange first, then all others at once.
+const PERP_SOURCES = [
+  (b) => ["https://api.bybit.com/v5/market/tickers?category=linear&symbol=" + b + "USDT", (d) => d?.result?.list?.[0]?.lastPrice],
+  (b) => ["https://api.bitget.com/api/v2/mix/market/ticker?productType=USDT-FUTURES&symbol=" + b + "USDT", (d) => d?.data?.[0]?.lastPr],
+  (b) => ["https://www.okx.com/api/v5/market/ticker?instId=" + b + "-USDT-SWAP", (d) => d?.data?.[0]?.last],
+  (b) => ["https://api.gateio.ws/api/v4/futures/usdt/tickers?contract=" + b + "_USDT", (d) => d?.[0]?.last],
+  (b) => ["https://contract.mexc.com/api/v1/contract/ticker?symbol=" + b + "_USDT", (d) => d?.data?.lastPrice],
+  (b) => ["https://fapi.binance.com/fapi/v1/ticker/price?symbol=" + b + "USDT", (d) => d?.price],
+  (b) => ["https://api-futures.kucoin.com/api/v1/ticker?symbol=" + b + "USDTM", (d) => d?.data?.price],
+];
+let _perpStart = 0;
+async function getPerp(b) {
+  const [u0, p0] = PERP_SOURCES[_perpStart](b);
+  const v0 = await tryPrice(u0, p0, 2500);
+  if (v0 !== null) return v0;
+  return new Promise((resolve) => {
+    let left = PERP_SOURCES.length - 1;
+    PERP_SOURCES.forEach((src, i) => {
+      if (i === _perpStart) return;
+      const [url, pick] = src(b);
+      tryPrice(url, pick).then((v) => {
+        if (v !== null) { _perpStart = i; resolve(v); }
+        else if (--left === 0) resolve(null);
+      });
+    });
+  });
 }
 
 // Spot prices fall through a list of exchanges (some block Workers IPs). The last working one is tried first.
@@ -173,8 +203,9 @@ function getPrice(coin) {
   return e.p;
 }
 async function getPriceRaw(coin) {
-  const c = coin.toUpperCase();
-  if (STOCK_TICKERS.has(c)) return getBybit(c);
+  const x = splitCoin(coin) || { base: coin.toUpperCase(), perp: false };
+  const c = x.base;
+  if (x.perp) return getPerp(c);
   if (c === "HYPE" || c === "XMR") {
     try {
       const res = await fetch(
@@ -201,7 +232,7 @@ function parseNote(note) {
 
 // High/low of the last few 1-minute candles: a wick that touched a target between two cron ticks still fires the alert.
 async function getRange(coin) {
-  const c = coin.toUpperCase();
+  const c = (splitCoin(coin) || { base: coin.toUpperCase() }).base;
   const srcs = [
     [`https://api.bybit.com/v5/market/kline?category=linear&symbol=${c}USDT&interval=1&limit=3`, (d) => d?.result?.list],
     [`https://api.bybit.com/v5/market/kline?category=spot&symbol=${c}USDT&interval=1&limit=3`, (d) => d?.result?.list],
@@ -894,9 +925,9 @@ async function handleApi(request, env, url) {
   }
   if (M === "POST" && p === "/api/alerts") {
     const b = await body();
-    const coin = String(b.coin || "").toUpperCase().trim();
+    const coin = normalizeCoin(b.coin);
     const { direction, built } = apiTargets(b);
-    if (!/^[A-Z0-9]{1,12}$/.test(coin) || built.length === 0) return jsonRes({ error: "invalid" }, 400);
+    if (!coin || built.length === 0) return jsonRes({ error: "invalid" }, 400);
     const entryIn = Number(b.entry);
     const hasEntry = isFinite(entryIn) && entryIn > 0;
     const ch = await pickChannels(env, b);
@@ -1686,6 +1717,7 @@ Object.assign(I18N,{'مارجین لازم':'Margin needed','سرمایهای ک
 const nz=s=>s.replace(/\u200c/g,'').replace(/\s+/g,' ').trim();
 const PAT=[
  [/^سایز پوزیشن \((.+) \$\) بیشتر از سرمایه است\.$/,m=>'Position size ('+m[1]+' $) is larger than the account balance.'],
+ [/^✅ همه چیز سالم است — (?:(\d+) آلارم فعال زیر نظر است|آلارم فعالی نیست) · آخرین چک: (چند ثانیه|\d+) ?(?:دقیقه)? پیش$/,m=>'✅ All good — '+(m[1]?m[1]+' active alerts being watched':'no active alerts')+' · last check: '+(m[2]==='چند ثانیه'?'a few seconds':m[2]+' min')+' ago'],
  [/^⚠️ آخرین چک خودکار (\d+) دقیقه پیش بوده — Cron Trigger را چک کن$/,m=>'⚠️ Last automatic check was '+m[1]+' min ago — check the Cron Trigger'],
  [/^(✓ چک خودکار فعال|⚠️ خطا در چک: .*?) \(آخرین ثبت: (چند ثانیه|\d+) ?(?:دقیقه)? پیش\)(?: — قیمت این کوین‌ها گرفته نمی‌شود: (.*))?$/,m=>(m[1][0]==='✓'?'✓ Automatic check active':'⚠️ Check error: '+m[1].slice(13))+' (last run: '+(m[2]==='چند ثانیه'?'a few seconds':m[2]+' min')+' ago)'+(m[3]?' — prices unavailable for: '+m[3]:'')],
  [/^ربات @(\S+) ثبت شد — منتظر اتصال چت$/,m=>'Bot @'+m[1]+' registered — waiting for the chat to connect'],
@@ -1907,7 +1939,7 @@ $('#catlist').onclick=async e=>{const row=e.target.closest('.crow');if(!row)retu
 $('#catlist').onchange=async e=>{const row=e.target.closest('.crow');if(!row||e.target.tagName!=='INPUT')return;const id=+row.dataset.id,c=mgrCats().find(x=>x.id===id);if(!c)return;const name=e.target.value.trim();if(!name||name===c.name){e.target.value=c.name;return}try{const r=await api('PUT',mgrApi()+'/'+id,{name,color:c.color});if(r.cat)Object.assign(c,r.cat);paintChips();paintWChips();paintSChips();paintPChips();paintGChips();paintKChips();render();renderW();renderS();renderP();renderG();renderK();}catch(x){say('ذخیره نشد ('+x.message+')');e.target.value=c.name}};
 $('#go').onclick=async()=>{
  const targets=[...document.querySelectorAll('.tr')].map(r=>({price:parseFloat(r.querySelector('.tp').value.replace(/,/g,'')),note:r.querySelector('.tn').value})).filter(t=>t.price>0);
- const coin=$('#coin').value.trim();if(!coin||!targets.length){say('کوین و حداقل یک قیمت لازمه');return}
+ fixCoin();const coin=$('#coin').value.trim();if(!coin||!targets.length){say('کوین و حداقل یک قیمت لازمه');return}
  const ch=[$('#c-tg').checked&&'tg',$('#c-em').checked&&'email'].filter(Boolean);if(!ch.length){say('حداقل یک روش اعلان را انتخاب کن');return}
  $('#go').disabled=true;
  try{await api(eid?'PUT':'POST',eid?'/api/alerts/'+eid:'/api/alerts',{coin,direction:dir,entry:parseFloat($('#entry').value.replace(/,/g,'')),targets,ch,cat:newCat});closeSh('#sh');await load()}catch(e){say('ثبت نشد ('+e.message+')')}
@@ -1917,6 +1949,9 @@ function show(t){tab=t;['a','s','p','g','k','w','c'].forEach(x=>$('#p-'+x).hidde
  $('#fab').style.display=t==='c'?'none':'';$('#fab').textContent=t==='a'?'＋ آلارم جدید':t==='s'?'＋ سناریو جدید':t==='p'?'＋ پوزیشن جدید':t==='g'?'＋ استراتژی جدید':t==='k'?'＋ تسک جدید':'＋ واچلیست جدید';
  if(t==='s'){if(Date.now()-_sAt>30000)loadS()}else if(t==='p'){if(Date.now()-_pAt>30000)loadP()}else if(t==='g'){if(Date.now()-_gAt>30000)loadG()}else if(t==='k'){if(Date.now()-_kAt>30000)loadK()}else  if(t==='w'){if(Date.now()-_wAt>30000)loadW()}else if(t==='a'&&Date.now()-_aAt>20000)refresh()}
 const TABS='aspgkwc';
+const STK=new Set(${JSON.stringify([...STOCK_TICKERS])});
+function fixCoin(){const i=$('#coin');let v=i.value.toUpperCase().replace(/[\s\/_-]/g,'');const m=/^([A-Z0-9]{1,12}?)(?:USDT)?(\.P)?$/.exec(v);if(m)v=m[1]+((m[2]||STK.has(m[1]))?'USDT.P':'');i.value=v}
+$('#coin').addEventListener('change',fixCoin);$('#coin').addEventListener('blur',fixCoin);
 document.querySelectorAll('.tb button').forEach(b=>b.onclick=()=>{show(b.dataset.t);try{history.pushState(null,'','#'+b.dataset.t)}catch(e){}try{localStorage.setItem('tab',b.dataset.t)}catch(e){}scrollTo(0,0)});
 addEventListener('popstate',()=>{const t=location.hash.slice(1);show(t.length===1&&TABS.includes(t)?t:'a')});
 if('serviceWorker' in navigator)addEventListener('load',()=>{try{navigator.serviceWorker.register('/sw.js').catch(()=>{})}catch(e){}});
@@ -2050,6 +2085,7 @@ async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=
  if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
  const m=Math.round((r.now-r.t)/60000);
  if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+ else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
  else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
 $('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
 async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
