@@ -1,11 +1,11 @@
-# هر بار که چیزی در شاخه‌ی main پوش شود، ورکر «alert» خودکار روی Cloudflare دیپلوی می‌شود.
+# هر بار که چیزی در شاخه‌ی clude پوش شود، ورکر «alert» خودکار روی Cloudflare دیپلوی می‌شود.
 # Secrets لازم (GitHub ← Settings ← Secrets and variables ← Actions):
 #   CLOUDFLARE_API_TOKEN ، CLOUDFLARE_ACCOUNT_ID ، KV_NAMESPACE_ID
 # Secret اختیاری: D1_DATABASE_ID (اگر بگذاری، دیتابیس D1 هم وصل می‌شود)
 name: Deploy to Cloudflare
 on:
   push:
-    branches: [main]
+    branches: [clude]
     paths: ["worker.js", "wrangler.toml", ".github/workflows/deploy.yml"]
   workflow_dispatch: {}   # دکمه‌ی «Run workflow» برای دیپلوی دستی
 
