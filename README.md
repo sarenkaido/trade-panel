@@ -27,28 +27,28 @@
 **الف) ساخت KV (جای ذخیره‌ی اطلاعات)**
 1. وارد [dash.cloudflare.com](https://dash.cloudflare.com) شو.
 2. منوی چپ: **Storage & Databases ← KV**.
-3. **Create Instance** (یا Create namespace) را بزن، اسمش را `alerts` بگذار و بساز.
+3. **‏Create Instance** (یا Create namespace) را بزن، اسمش را `alerts` بگذار و بساز.
 
 **ب) ساخت ورکر**
 1. منوی چپ: **Workers & Pages ← Create ← Create Worker**.
 2. اسمش را بنویس (مثلاً `alert`) و **Deploy** را بزن.
-3. **Edit code** را بزن، همه‌ی کد داخل ادیتور را پاک کن.
+3. **‏Edit code** را بزن، همه‌ی کد داخل ادیتور را پاک کن.
 4. فایل [`worker.js`](worker.js) را از همین ریپو باز کن، **Raw** را بزن، همه‌اش را کپی کن و در ادیتور بچسبان.
-5. **Deploy** را بزن.
+5. **‏Deploy** را بزن.
 
 **پ) وصل کردن KV**
 1. صفحه‌ی ورکر ← **Settings ← Bindings ← Add ← KV namespace**.
 2. اسم متغیر دقیقاً: `ALERTS_KV` — و KV که ساختی (`alerts`) را انتخاب کن ← **Save**.
 
 **ت) چک خودکار هر دقیقه**
-1. **Settings ← Trigger Events** (یا **Triggers**) ← **Add ← Cron Trigger**.
+1. **‏Settings ← Trigger Events** (یا **Triggers**) ← **Add ← Cron Trigger**.
 2. بنویس: `* * * * *` ← **Save**.
 
 تمام! آدرس ورکر (مثل `alert.xxxx.workers.dev`) سایت توست.
 
 ### راه ۲ — با wrangler (ترمینال)
 
-Node.js نصب باشد. بعد:
+‏Node.js نصب باشد. بعد:
 
 <div dir="ltr">
 
@@ -61,7 +61,7 @@ npx wrangler kv namespace create ALERTS_KV
 
 </div>
 
-- `login` مرورگر را باز می‌کند؛ **Allow** را بزن.
+- ‏`login` مرورگر را باز می‌کند؛ **Allow** را بزن.
 - دستور آخر یک `id` چاپ می‌کند. آن را در فایل `wrangler.toml` جای `id` بگذار (و اگر خواستی `name` را به اسم دلخواهت عوض کن).
 
 بعد دیپلوی:
@@ -82,9 +82,9 @@ npx wrangler deploy
 اگر ریپو را در حساب خودت داری، می‌توانی هر پوش را خودکار دیپلوی کنی:
 1. در Cloudflare یک **API Token** با قالب **Edit Cloudflare Workers** بساز (My Profile ← API Tokens).
 2. در GitHub: ریپو ← **Settings ← Secrets and variables ← Actions ← New repository secret** و این دو را بساز:
-   - `CLOUDFLARE_API_TOKEN` = توکن
-   - `CLOUDFLARE_ACCOUNT_ID` = شناسه‌ی حساب (در داشبورد Cloudflare، صفحه‌ی Workers، سمت راست)
-   - `KV_NAMESPACE_ID` = شناسه‌ی KV (در داشبورد: Storage & Databases ← KV)
+   - ‏`CLOUDFLARE_API_TOKEN` = توکن
+   - ‏`CLOUDFLARE_ACCOUNT_ID` = شناسه‌ی حساب (در داشبورد Cloudflare، صفحه‌ی Workers، سمت راست)
+   - ‏`KV_NAMESPACE_ID` = شناسه‌ی KV (در داشبورد: Storage & Databases ← KV)
 3. از این به بعد با هر تغییر `worker.js` در شاخه‌ی `main`، دیپلوی خودکار انجام می‌شود. نتیجه در تب **Actions** است. دیپلوی دستی: Actions ← **Deploy to Cloudflare** ← **Run workflow**.
 
 ---
@@ -171,9 +171,9 @@ npx wrangler deploy
 
 | شبکه | آدرس کیف پول |
 |---|---|
-| **Ethereum** و **BNB Chain** (BSC) | `0x92D262062d36688261032051b2B9Ae08F3644b89` |
-| **Solana** | `4oWwKYuiEfaTWvTPu3isGSqHtsKydTy5oLD3qo5PRpKR` |
-| **Tron** (TRX / USDT-TRC20) | `TCbk4NGW57Wiy6YJXQmx1pPV2hsw1SQndY` |
+| **‏Ethereum** و **BNB Chain** (BSC) | ‏`0x92D262062d36688261032051b2B9Ae08F3644b89` |
+| **‏Solana** | ‏`4oWwKYuiEfaTWvTPu3isGSqHtsKydTy5oLD3qo5PRpKR` |
+| **‏Tron** (TRX / USDT-TRC20) | ‏`TCbk4NGW57Wiy6YJXQmx1pPV2hsw1SQndY` |
 
 > ⚠️ فقط روی همون شبکه‌ی نوشته‌شده بفرست (مثلاً یک آدرس برای Ethereum و BNB Chain مشترکه ولی Solana و Tron هرکدوم جدان). قبل از ارسال، آدرس رو با همین صفحه‌ی گیت‌هاب دوباره تطبیق بده.
 
