@@ -1,3 +1,5 @@
+<div dir="rtl">
+
 # امنیت / Security
 
 هر کس این پروژه را روی **حساب Cloudflare خودش** دیپلوی می‌کند، داده‌هایش (آلارم‌ها، حساب، توکن ربات) فقط در KV/D1 همان حساب می‌ماند. این مخزن هیچ توکن، شناسه یا ایمیل شخصی‌ای ندارد.
@@ -14,6 +16,10 @@
 ## گزارش آسیب‌پذیری
 لطفاً مشکل امنیتی را به‌صورت عمومی در Issue ننویس. از بخش **Security → Report a vulnerability** همین مخزن در گیت‌هاب گزارش بده.
 
----
+</div>
+
+<div dir="ltr">
 
 Everyone who deploys this runs it on **their own** Cloudflare account; data stays in their own KV/D1. This repository contains no tokens, IDs or personal e-mails. Register right after deploying (or set `OWNER_EMAIL`), keep all secrets in GitHub Secrets, and report vulnerabilities privately via **Security → Report a vulnerability**.
+
+</div>

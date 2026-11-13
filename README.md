@@ -1,3 +1,5 @@
+<div dir="rtl">
+
 # پنل آلارم قیمت
 
 یک سایت شخصی برای آلارم قیمت ارز و سهام. آلارم‌هایت را در سایت می‌سازی و وقتی قیمت به هدف رسید، **پیامش در تلگرام** (و اختیاری ایمیل) می‌آید. روی Cloudflare Worker اجرا می‌شود و **رایگان است**.
@@ -47,19 +49,31 @@
 ### راه ۲ — با wrangler (ترمینال)
 
 Node.js نصب باشد. بعد:
+
+<div dir="ltr">
+
 ```bash
 git clone https://github.com/sarenkaido/trade-panel
 cd trade-panel
 npx wrangler login
 npx wrangler kv namespace create ALERTS_KV
 ```
+
+</div>
+
 - `login` مرورگر را باز می‌کند؛ **Allow** را بزن.
 - دستور آخر یک `id` چاپ می‌کند. آن را در فایل `wrangler.toml` جای `id` بگذار (و اگر خواستی `name` را به اسم دلخواهت عوض کن).
 
 بعد دیپلوی:
+
+<div dir="ltr">
+
 ```bash
 npx wrangler deploy
 ```
+
+</div>
+
 کد، KV و Cron همه از `wrangler.toml` خوانده می‌شوند.
 
 دفعه‌های بعد که کد عوض شد: `git pull` و دوباره `npx wrangler deploy`.
@@ -165,7 +179,9 @@ npx wrangler deploy
 
 ⭐ اگه نمی‌خوای پولی بدی، ستاره‌ی ریپو (Star) و معرفی به دوستان هم همون‌قدر ارزش داره.
 
----
+</div>
+
+<div dir="ltr">
 
 ## ☕ Support the project
 
@@ -178,3 +194,5 @@ Free, open source (MIT) and runs on **your own** infrastructure — no central s
 | **Tron** (TRX / USDT-TRC20) | `TCbk4NGW57Wiy6YJXQmx1pPV2hsw1SQndY` |
 
 > ⚠️ Send only on the listed network, and double-check the address against this page before sending. A ⭐ star on the repo is just as appreciated.
+
+</div>
