@@ -85,7 +85,7 @@ npx wrangler deploy
    - ‏`CLOUDFLARE_API_TOKEN` = توکن
    - ‏`CLOUDFLARE_ACCOUNT_ID` = شناسه‌ی حساب (در داشبورد Cloudflare، صفحه‌ی Workers، سمت راست)
    - ‏`KV_NAMESPACE_ID` = شناسه‌ی KV (در داشبورد: Storage & Databases ← KV)
-3. از این به بعد با هر تغییر `worker.js` در شاخه‌ی `clude`، دیپلوی خودکار انجام می‌شود. نتیجه در تب **Actions** است. دیپلوی دستی: Actions ← **Deploy to Cloudflare** ← **Run workflow**.
+3. از این به بعد با هر تغییر `worker.js` در شاخه‌ی پیش‌فرض (default) ریپو، دیپلوی خودکار انجام می‌شود. نتیجه در تب **Actions** است. دیپلوی دستی: Actions ← **Deploy to Cloudflare** ← **Run workflow**.
 
 ---
 
