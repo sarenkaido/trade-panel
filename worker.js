@@ -328,11 +328,13 @@ async function checkPricesOnce(env) {
       if (should) {
         const lastTrig = a.last_triggered ? a.last_triggered[String(tid)] : null;
         const nowTs = Date.now() / 1000;
+        // Only mark the target complete when a notification is actually queued.
+        // A suppressed/recent or failed notification must remain eligible for retry.
         if (!lastTrig || nowTs - lastTrig >= 120) {
           upd.lastTriggeredTs[String(tid)] = nowTs;
           newMsgs.push([a, t, price, kind, a.entry_price]);
+          upd.newlyTriggered.push(tid);
         }
-        upd.newlyTriggered.push(tid);
       }
     }
     if (entryHealed) upd.ref_price = entryPrice;
@@ -422,11 +424,14 @@ async function runScheduledCheck(env) {
     const tgBlocks = blocks.filter((x) => x.ch.includes("tg")), emBlocks = blocks.filter((x) => x.ch.includes("email"));
     // If Telegram rejects the formatting, resend as plain text so an alert is never lost.
     const send = async (md, plain) => {
-      let ok = false, err = "";
+      let ok = true, err = "";
       for (const chat of chats) {
         let r = await apiCall(env, "sendMessage", { chat_id: chat, text: md, parse_mode: "MarkdownV2" }, tok);
         if (!r.ok) r = await apiCall(env, "sendMessage", { chat_id: chat, text: plain }, tok);
-        if (r.ok) ok = true; else err = String(r.description || r.error || "unknown").slice(0, 80);
+        if (!r.ok) {
+          ok = false;
+          err = String(r.description || r.error || "unknown").slice(0, 80);
+        }
       }
       return { ok, err };
     };
@@ -457,7 +462,14 @@ async function runScheduledCheck(env) {
       if (failed.length) {
         for (const a of fresh.alerts || []) {
           const tids = failed.filter((f) => f.aid === a.id).map((f) => f.tid);
-          if (tids.length) a.triggered = (a.triggered || []).filter((x) => !tids.includes(x));
+          if (tids.length) {
+            a.triggered = (a.triggered || []).filter((x) => !tids.includes(x));
+            // Clear the cooldown too; otherwise the next cron tick re-marks the
+            // target as triggered without queuing a message, losing the alert.
+            if (a.last_triggered) {
+              for (const tid of tids) delete a.last_triggered[String(tid)];
+            }
+          }
         }
         await kvSetJSON(env, "alerts", fresh);
       }
@@ -1989,7 +2001,7 @@ const cv=id=>{const v=$(id).value.replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.i
 const cf=(n,d)=>isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:d||2}):'—';
 const pf=n=>!isFinite(n)?'—':n.toLocaleString('en-US',{maximumFractionDigits:n>=1000?2:n>=1?4:8});
 function calc(){
- const cap=cv('#c-cap'),rk=cv('#c-risk'),lv=cv('#c-lev'),en=cv('#c-en'),sp=cv('#c-st'),tp=cv('#c-tp'),fo=cv('#c-fo')||0,fc=cv('#c-fc')||0,ff=1+(fo+fc)/100;let err='',sl=null,dir='';
+ const cap=cv('#c-cap'),rk=cv('#c-risk'),lv=cv('#c-lev'),en=cv('#c-en'),sp=cv('#c-st'),tp=cv('#c-tp'),fo=cv('#c-fo')||0,fc=cv('#c-fc')||0;let err='',sl=null,dir='';
  const set=(id,v)=>{$(id).textContent=v};
  const clear=(bd)=>{set('#c-val','—');$('#c-val').classList.remove('on');['#c-not','#c-qty','#c-rsk','#c-rr','#c-tpd','#c-liq'].forEach(i=>set(i,'—'));set('#c-dir','—');set('#c-sl',sl!=null?cf(sl,4)+'%':'—');$('#c-rr').className='';$('#c-lad').innerHTML='';$('#c-bd').innerHTML=bd};
  if(cap!==null&&cap<=0)err='سرمایه باید بزرگ‌تر از صفر باشد.';
@@ -2001,7 +2013,7 @@ function calc(){
  else if(en!==null&&sp!==null){if(sp===en)err='حد ضرر نمی‌تواند برابر قیمت ورود باشد.';else{sl=Math.abs(en-sp)/en*100;dir=sp<en?'long':'short';if(tp!==null&&((dir==='long'&&tp<=en)||(dir==='short'&&tp>=en)))err='حد سود باید در سمت سود باشد (بالاتر از ورود برای Long، پایین‌تر برای Short).'}}
  $('#c-msg').textContent=err;
  if(err||[cap,rk,lv,sl].some(v=>v===null)){clear(err?'':'مقادیر را وارد کنید…');return}
- const risk$=cap*rk/100,size=risk$/(lv*(sl/100)*ff),not=size*lv,qty=not/en;
+ const risk$=cap*rk/100,totalFeePct=(fo+fc)/100,size=risk$/(lv*(sl/100+totalFeePct)),not=size*lv,qty=not/en;
  const tpd=tp!==null?Math.abs(tp-en)/en*100:null,fees=not*(fo+fc)/100,reward=tpd!==null?not*tpd/100-fees:null,rr=reward!==null&&reward>0?reward/risk$:null;
  const liq=lv>1||dir==='short'?(dir==='long'?en*(1-1/lv):en*(1+1/lv)):null;
  set('#c-val',cf(size));$('#c-val').classList.add('on');set('#c-not','$'+cf(not));set('#c-qty',pf(qty));set('#c-rsk','-$'+cf(risk$));
@@ -2017,7 +2029,1447 @@ function calc(){
  let m=size>cap?'سایز پوزیشن ('+cf(size)+' $) بیشتر از سرمایه است.':'';
  if(!m&&liq!==null&&((dir==='long'&&sp<=liq)||(dir==='short'&&sp>=liq)))m='حد ضرر بعد از قیمت لیکویید قرار دارد؛ لوریج را کم کن.';
  $('#c-msg').textContent=m;
- $('#c-bd').innerHTML='Risk = '+cf(cap)+' × '+rk+'% = $'+cf(risk$)+'<br>Margin = $'+cf(risk$)+' ÷ ('+lv+' × '+cf(sl,4)+'%'+(ff>1?' × '+ff.toFixed(4):'')+') = $'+cf(size)+'<br>Notional = $'+cf(size)+' × '+lv+' = $'+cf(not)+'<br>Qty = $'+cf(not)+' ÷ '+pf(en)+' = '+pf(qty)+(reward!==null?'<br>Reward = $'+cf(not)+' × '+cf(tpd,4)+'%'+(fees?' − fees $'+cf(fees):'')+' = $'+cf(reward):'');
+ $('#c-bd').innerHTML='Risk = '+cf(cap)+' × '+rk+'% = 
+}
+document.addEventListener('input',e=>{if(e.target.closest('#p-c'))calc()});
+(function(){
+ let d=null,ly=0,raf=0;
+ const L=$('#list');
+ let lx=0;const place=y=>{const cs=[...L.querySelectorAll('.card:not(.drag)')];if(!cs.length)return;const R=cs.map(o=>o.getBoundingClientRect()),multi=new Set(R.map(r=>Math.round(r.left))).size>1;let bi=0,bd=1e18;R.forEach((r,i)=>{const dx=lx-(r.left+r.width/2),dy=y-(r.top+r.height/2),dd=dx*dx+dy*dy;if(dd<bd){bd=dd;bi=i}});const r=R[bi],before=multi?(lx>r.left+r.width/2):(y<r.top+r.height/2);before?L.insertBefore(d.ph,cs[bi]):cs[bi].after(d.ph)};
+ const loop=()=>{if(!d)return;if(ly<90)scrollBy(0,-14);else if(ly>innerHeight-90)scrollBy(0,14);place(ly);raf=requestAnimationFrame(loop)};
+ L.addEventListener('pointerdown',e=>{const h=e.target.closest('.dh');if(!h)return;const c=h.closest('.card');if(L.querySelectorAll('.card').length<2)return;e.preventDefault();
+  const r=c.getBoundingClientRect();d={c,off:e.clientY-r.top,ox:e.clientX-r.left,ph:document.createElement('div')};
+  d.ph.className='ph';d.ph.style.height=r.height+'px';c.after(d.ph);
+  c.classList.add('drag');c.style.cssText='position:fixed;z-index:30;width:'+r.width+'px;left:'+r.left+'px;top:'+r.top+'px';
+  try{h.setPointerCapture(e.pointerId)}catch(_){}
+  document.body.style.userSelect='none';ly=e.clientY;lx=e.clientX;raf=requestAnimationFrame(loop)});
+ document.addEventListener('pointermove',e=>{if(!d)return;ly=e.clientY;lx=e.clientX;d.c.style.top=(e.clientY-d.off)+'px';d.c.style.left=(e.clientX-d.ox)+'px';place(ly)});
+ const end=ok=>{if(!d)return;cancelAnimationFrame(raf);const c=d.c;d.ph.replaceWith(c);c.classList.remove('drag');c.style.cssText='';d=null;document.body.style.userSelect='';
+  if(!ok){render();return}
+  if(fltOn()){say('برای جابه‌جایی، اول فیلترها را پاک کن');render();return}
+  const ids=[...L.querySelectorAll('.card')].map(x=>+x.dataset.id),m=new Map(alerts.map(a=>[a.id,a]));alerts=ids.map(i=>m.get(i)).filter(Boolean);
+  api('POST','/api/alerts/reorder',{ids}).catch(()=>{say('جابه‌جایی ذخیره نشد');load()})};
+ document.addEventListener('pointerup',()=>end(true));document.addEventListener('pointercancel',()=>end(false));
+})();
+let st={email:'',verified:false,provider:false};
+function paintSettings(){const c=$('#c-em');c.disabled=!st.verified;if(!st.verified)c.checked=false;$('#c-emh').textContent=st.verified?'':'(اول ایمیل را در ⚙️ تنظیمات تایید کن)';
+ const e=$('#emst');e.className='st '+(st.verified?'ok':'bad');e.textContent=st.verified?'✓ ایمیل تایید شده: '+st.email:(st.provider?'ایمیلی تایید نشده':'⚠️ سرویس ایمیل تنظیم نشده');$('#emrm').hidden=!st.verified}
+async function loadSettings(s0){try{st=s0||await api('GET','/api/settings')}catch(e){}paintSettings()}
+$('#gear').onclick=()=>{setSP('n');if(Date.now()-_setAt>45000){_setAt=Date.now();loadSettings();loadUser();loadTg()}$('#ss').classList.add('on')};
+$('#ssx').onclick=()=>closeSh('#ss');
+$('#tbtn').onclick=()=>{let m='system';try{m=localStorage.getItem('theme')||'system'}catch(e){}const nx=m==='system'?'light':m==='light'?'dark':'system';try{localStorage.setItem('theme',nx)}catch(e){}themeFx();applyTheme()};
+$('#emreq').onclick=async()=>{const em=$('#em').value.trim();if(!em){say('ایمیل را وارد کن');return}$('#emreq').disabled=true;try{await api('POST','/api/email/request',{email:em});$('#emcode').hidden=false;say('کد تایید به ایمیل فرستاده شد (۱۰ دقیقه اعتبار دارد)')}catch(e){say('ارسال نشد ('+e.message+')')}$('#emreq').disabled=false};
+$('#emver').onclick=async()=>{try{await api('POST','/api/email/verify',{code:$('#emc').value.trim()});$('#emcode').hidden=true;$('#emc').value='';await loadSettings();say('ایمیل تایید شد ✓')}catch(e){say('تایید نشد ('+e.message+')')}};
+$('#emrm').onclick=()=>ask('ایمیل حذف بشه؟ آلارم‌هایی که ایمیل دارن فقط از تلگرام اعلان می‌گیرن.',async()=>{await api('POST','/api/email/remove');await loadSettings()});
+$('#tst').onclick=async()=>{const b=$('#tst');b.disabled=true;try{const r=await api('POST','/api/test-notify');const f=(n,x)=>n+': '+(x.skipped?'— (ایمیل تایید نشده)':x.ok?'✓ فرستاده شد':'✗ '+x.error);say(f('تلگرام',r.tg)+'\n'+f('ایمیل',r.email))}catch(e){say('تست انجام نشد ('+e.message+')')}b.disabled=false};
+$('#out').onclick=async()=>{try{await api('POST','/api/logout')}catch(e){}try{localStorage.removeItem('acache')}catch(e){}location.reload()};
+let am='login',codeSent=false,lgOn=false,mailOk=true;
+const EM=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function setMode(m){am=m;codeSent=false;const L=m==='login',R=m==='register',F=m==='reset';
+ $('#lgt').textContent=L?'ورود به پنل':R?'ثبت‌نام — ساخت حساب':'بازیابی رمز';
+ $('#f-u').hidden=F;$('#f-p2').hidden=L;$('#f-c').hidden=true;$('#f-k').hidden=!(R&&!mailOk);
+ $('#lpl').textContent=L?'رمز عبور':'رمز جدید (حداقل ۸ کاراکتر)';
+ $('#pw').autocomplete=L?'current-password':'new-password';
+ $('#lgo').textContent=L?'ورود':'دریافت کد در ایمیل';
+ $('#lsw').textContent=L?'رمز را فراموش کردم':'بازگشت به ورود';$('#lsw').hidden=R;
+ $('#lge').textContent='';$('#lge').style.color=''}
+async function showLogin(){if(lgOn)return;lgOn=true;let r={registered:true,mail:true};try{r=await(await fetch('/api/auth/state',{credentials:'same-origin'})).json()}catch(e){}
+ mailOk=r.mail!==false;setMode(r.registered?'login':'register');$('#lg').classList.add('on');setTimeout(()=>$('#lu').focus(),50)}
+function done(){['#pw','#pw2','#lc','#lkey'].forEach(i=>$(i).value='');lgOn=false;closeSh('#lg');$('#lgo').disabled=false;load();checkLegacy()}
+async function doAuth(){const b=$('#lgo'),u=$('#lu').value.trim(),pw=$('#pw').value,e=$('#lge');e.textContent='';e.style.color='';
+ const bad=m=>{e.textContent=m;b.disabled=false};b.disabled=true;
+ try{
+  if(am==='login'){await api('POST','/api/login',{email:u,password:pw});return done()}
+  if(!codeSent){
+   if(pw.length<8)return bad('رمز باید حداقل ۸ کاراکتر باشد.');
+   if(pw!==$('#pw2').value)return bad('تکرار رمز یکسان نیست.');
+   if(am==='register'&&!EM.test(u))return bad('ایمیل معتبر وارد کن.');
+   if(am==='register'&&!mailOk&&!$('#lkey').value.trim())return bad('کلید API سرویس ایمیل را وارد کن.');
+   await api('POST','/api/auth/code',{purpose:am,email:u,password:pw,lang:LANG,resendKey:$('#lkey').value.trim(),from:$('#lfrom').value.trim()});
+   codeSent=true;$('#f-c').hidden=false;b.textContent='تایید و ادامه';e.textContent='کد ۶ رقمی به ایمیلت فرستاده شد (پوشه‌ی اسپم را هم ببین).';e.style.color='var(--long)';$('#lc').focus();b.disabled=false;return}
+  await api('POST','/api/auth/confirm',{code:$('#lc').value.trim()});done()
+ }catch(x){const m=String(x.message);bad(m.includes('wrong password')?'ایمیل یا رمز اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('not allowed')?'این ایمیل اجازه‌ی ثبت‌نام ندارد.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('429')?'تلاش زیاد؛ کمی بعد دوباره امتحان کن.':'خطا ('+m+')')}}
+$('#lang').textContent=LANG==='en'?'فا':'EN';$('#lgl').textContent=LANG==='en'?'فارسی':'English';$('#lang').onclick=$('#lgl').onclick=()=>setLang(LANG==='en'?'fa':'en');
+$('#lgo').onclick=doAuth;$('#lsw').onclick=()=>setMode(am==='login'?'reset':'login');
+['lu','pw','pw2','lc'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')doAuth()}));
+async function loadUser(){try{const r=await api('GET','/api/auth/state');$('#acu').textContent=r.user;$('#aleg').hidden=!r.legacy;$('#akey').hidden=r.mail!==false}catch(e){}}
+let aemSent=false;
+$('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disabled=true;
+ try{
+  if(!aemSent){
+   if(!EM.test(em)){say('ایمیل معتبر وارد کن.');return}
+   if(!$('#ac').value){say('رمز فعلی را وارد کن.');return}
+   await api('POST','/api/auth/code',{purpose:'email',email:em,current:$('#ac').value,lang:LANG,resendKey:$('#akey').value.trim(),from:''});
+   aemSent=true;$('#acode').hidden=false;b.textContent='تایید ایمیل';say('کد به ایمیل جدید فرستاده شد (اسپم را هم ببین).')
+  }else{
+   await api('POST','/api/auth/confirm',{code:$('#acode').value.trim()});
+   aemSent=false;$('#acode').hidden=true;$('#acode').value='';$('#ae').value='';$('#ac').value='';b.textContent='ارسال کد به ایمیل جدید';say('ایمیل ثبت شد ✓');loadUser()
+  }
+ }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
+ finally{b.disabled=false}};
+function setSP(p){document.querySelectorAll('#sst button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));document.querySelectorAll('#ss .sp').forEach(x=>x.classList.toggle('on',x.dataset.p===p))}
+document.querySelectorAll('#sst button').forEach(b=>b.onclick=()=>setSP(b.dataset.p));
+async function checkLegacy(){try{const r=await api('GET','/api/auth/state');if(r.loggedIn)syncLang();if(r.loggedIn&&r.legacy){setSP('a');$('#ss').classList.add('on');loadUser();loadTg();loadSettings();say('حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.')}}catch(e){}}
+$('#acs').onclick=async()=>{if($('#ap').value.length<8){say('رمز جدید باید حداقل ۸ کاراکتر باشد.');return}try{await api('POST','/api/auth/change',{current:$('#ac').value,password:$('#ap').value});['#ac','#ap'].forEach(i=>$(i).value='');say('رمز تغییر کرد ✓');}catch(e){say(String(e.message).includes('wrong')?'رمز فعلی اشتباه است.':'ذخیره نشد ('+e.message+')')}};
+let tgs={};
+function paintTg(){const e=$('#tgst');e.className='st '+(tgs.connected?'ok':'bad');
+ e.textContent=tgs.connected?'✓ متصل: @'+tgs.bot:(tgs.hasToken?'ربات @'+tgs.bot+' ثبت شد — منتظر اتصال چت':(tgs.viaEnv?'از تنظیمات ورکر استفاده می‌شود (برای تغییر، توکن جدید بده)':'ربات متصل نیست'));
+ $('#tgstep').hidden=!(tgs.hasToken&&!tgs.connected);if(tgs.connected)$('#tgpick').innerHTML='';$('#tglink').href=tgs.link||'#';$('#tgoff').hidden=!tgs.hasToken}
+async function loadTg(){try{tgs=await api('GET','/api/tg')}catch(e){}paintTg()}
+$('#tgset').onclick=async()=>{const v=$('#tgt').value.trim();if(!v){say('توکن ربات را وارد کن');return}try{tgs=await api('POST','/api/tg/token',{token:v});$('#tgt').value='';paintTg();if(tgs.wh)say('یک Webhook قدیمی روی این ربات بود و حذف شد. حالا لینک را بزن و در تلگرام Start را (دوباره) بزن.')}catch(e){say(/invalid|rejected/.test(e.message)?'توکن معتبر نیست.':'ثبت نشد ('+e.message+')')}};
+$('#tgdet').onclick=async()=>{try{const r=await api('POST','/api/tg/detect');tgs=r;paintTg();
+ if(r.pick&&r.pick.length){$('#tgpick').innerHTML='<div class="st" style="margin:6px 0">این چت‌ها به ربات پیام داده‌اند. چت خودت را انتخاب کن:</div>'+r.pick.map(c=>'<button class="lk" style="display:block" data-c="'+esc(c.id)+'">'+esc(c.name)+(c.username?' (@'+esc(c.username)+')':'')+'</button>').join('');return}
+ say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}
+ catch(e){const m=String(e.message);say(m.includes('404')?'هنوز پیامی در ربات ندیدم. در تلگرام به ربات @'+tgs.bot+' یک پیام بفرست (مثلاً /start) و دوباره «تشخیص» را بزن.':/other getUpdates|Conflict/i.test(m)?'یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.':'تشخیص انجام نشد ('+m+')')}};
+$('#tgpick').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{tgs=await api('POST','/api/tg/choose',{chat:b.dataset.c});paintTg();say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}catch(x){say('انجام نشد ('+x.message+')')}};
+$('#tgoff').onclick=()=>ask('ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.',async()=>{tgs=await api('POST','/api/tg/disconnect');paintTg()});
+async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=$('#st');
+ if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
+ const m=Math.round((r.now-r.t)/60000);
+ if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+ else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+ else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
+async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
+ if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
+ const act=alerts.filter(a=>!doneA(a));if(!act.length)return;const cs=[...new Set(act.map(a=>a.coin))];
+ try{prices=await api('GET','/api/prices?coins='+cs.join(','))}catch(e){}
+ act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
+  const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
+  add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
+$('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
+async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
+markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
+try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArray(c.alerts)){alerts=c.alerts.filter(a=>a&&Array.isArray(a.targets)&&a.targets.length);if(Array.isArray(c.cats))cats=c.cats;render();paintChips()}}catch(e){}
+load();setTimeout(checkLegacy,1200);setTimeout(()=>{if(tab==='a'&&!witems.length&&!sitems.length)loadW()},4000);setTimeout(()=>document.body.classList.remove('boot'),450);
+setInterval(()=>{if(!document.hidden&&tab==='a')refresh()},60000);
+setInterval(()=>{if(!document.hidden&&tab==='a')liveTick()},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab==='a'&&Date.now()-_aAt>15000)refresh()});
+(()=>{let t=location.hash.slice(1);if(!(t.length===1&&TABS.includes(t))){try{t=localStorage.getItem('tab')||''}catch(e){t=''}}if(t.length===1&&TABS.includes(t)&&t!=='a')show(t)})();
+</script></body></html>`;
+
+
+// The page has no per-user data, so the browser may keep it and only revalidate (304 = a few bytes instead of ~170 KB).
+let _h = 2166136261;
+for (let i = 0; i < APP_HTML.length; i += 7) _h = Math.imul(_h ^ APP_HTML.charCodeAt(i), 16777619);
+const HTML_ETAG = '"' + (_h >>> 0).toString(36) + "-" + APP_HTML.length.toString(36) + '"';
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      try { return await handleApi(request, env, url); }
+      catch (e) {
+        const m = String((e && e.message) || e);
+        console.log("[api error]", m);
+        return new Response(JSON.stringify({ error: /limit exceeded/i.test(m) ? "kv limit: daily write quota is used up, try again after 00:00 UTC" : m.slice(0, 200) }), { status: 500, headers: { "content-type": "application/json" } });
+      }
+    }
+    if (url.pathname === "/manifest.webmanifest") return staticRes(MANIFEST, "application/manifest+json");
+    if (url.pathname === "/icon.svg") return staticRes(ICON_SVG, "image/svg+xml");
+    if (url.pathname === "/icon-192.png") return staticRes(b64(ICON_192), "image/png");
+    if (url.pathname === "/icon-512.png") return staticRes(b64(ICON_512), "image/png");
+    if (url.pathname === "/sw.js") return new Response(SW_JS, { headers: { "content-type": "text/javascript", "cache-control": "no-cache", "service-worker-allowed": "/" } });
+    if (url.pathname === "/" || url.pathname === "/app") {
+      if (request.headers.get("if-none-match") === HTML_ETAG) return new Response(null, { status: 304, headers: { etag: HTML_ETAG, "cache-control": "no-cache" } });
+      return new Response(APP_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+          etag: HTML_ETAG,
+          "x-robots-tag": "noindex, nofollow",
+          "x-frame-options": "DENY",
+          ...SEC_HEADERS,
+        },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledCheck(env));
+  },
+};+cf(risk$)+'<br>Margin = 
+}
+document.addEventListener('input',e=>{if(e.target.closest('#p-c'))calc()});
+(function(){
+ let d=null,ly=0,raf=0;
+ const L=$('#list');
+ let lx=0;const place=y=>{const cs=[...L.querySelectorAll('.card:not(.drag)')];if(!cs.length)return;const R=cs.map(o=>o.getBoundingClientRect()),multi=new Set(R.map(r=>Math.round(r.left))).size>1;let bi=0,bd=1e18;R.forEach((r,i)=>{const dx=lx-(r.left+r.width/2),dy=y-(r.top+r.height/2),dd=dx*dx+dy*dy;if(dd<bd){bd=dd;bi=i}});const r=R[bi],before=multi?(lx>r.left+r.width/2):(y<r.top+r.height/2);before?L.insertBefore(d.ph,cs[bi]):cs[bi].after(d.ph)};
+ const loop=()=>{if(!d)return;if(ly<90)scrollBy(0,-14);else if(ly>innerHeight-90)scrollBy(0,14);place(ly);raf=requestAnimationFrame(loop)};
+ L.addEventListener('pointerdown',e=>{const h=e.target.closest('.dh');if(!h)return;const c=h.closest('.card');if(L.querySelectorAll('.card').length<2)return;e.preventDefault();
+  const r=c.getBoundingClientRect();d={c,off:e.clientY-r.top,ox:e.clientX-r.left,ph:document.createElement('div')};
+  d.ph.className='ph';d.ph.style.height=r.height+'px';c.after(d.ph);
+  c.classList.add('drag');c.style.cssText='position:fixed;z-index:30;width:'+r.width+'px;left:'+r.left+'px;top:'+r.top+'px';
+  try{h.setPointerCapture(e.pointerId)}catch(_){}
+  document.body.style.userSelect='none';ly=e.clientY;lx=e.clientX;raf=requestAnimationFrame(loop)});
+ document.addEventListener('pointermove',e=>{if(!d)return;ly=e.clientY;lx=e.clientX;d.c.style.top=(e.clientY-d.off)+'px';d.c.style.left=(e.clientX-d.ox)+'px';place(ly)});
+ const end=ok=>{if(!d)return;cancelAnimationFrame(raf);const c=d.c;d.ph.replaceWith(c);c.classList.remove('drag');c.style.cssText='';d=null;document.body.style.userSelect='';
+  if(!ok){render();return}
+  if(fltOn()){say('برای جابه‌جایی، اول فیلترها را پاک کن');render();return}
+  const ids=[...L.querySelectorAll('.card')].map(x=>+x.dataset.id),m=new Map(alerts.map(a=>[a.id,a]));alerts=ids.map(i=>m.get(i)).filter(Boolean);
+  api('POST','/api/alerts/reorder',{ids}).catch(()=>{say('جابه‌جایی ذخیره نشد');load()})};
+ document.addEventListener('pointerup',()=>end(true));document.addEventListener('pointercancel',()=>end(false));
+})();
+let st={email:'',verified:false,provider:false};
+function paintSettings(){const c=$('#c-em');c.disabled=!st.verified;if(!st.verified)c.checked=false;$('#c-emh').textContent=st.verified?'':'(اول ایمیل را در ⚙️ تنظیمات تایید کن)';
+ const e=$('#emst');e.className='st '+(st.verified?'ok':'bad');e.textContent=st.verified?'✓ ایمیل تایید شده: '+st.email:(st.provider?'ایمیلی تایید نشده':'⚠️ سرویس ایمیل تنظیم نشده');$('#emrm').hidden=!st.verified}
+async function loadSettings(s0){try{st=s0||await api('GET','/api/settings')}catch(e){}paintSettings()}
+$('#gear').onclick=()=>{setSP('n');if(Date.now()-_setAt>45000){_setAt=Date.now();loadSettings();loadUser();loadTg()}$('#ss').classList.add('on')};
+$('#ssx').onclick=()=>closeSh('#ss');
+$('#tbtn').onclick=()=>{let m='system';try{m=localStorage.getItem('theme')||'system'}catch(e){}const nx=m==='system'?'light':m==='light'?'dark':'system';try{localStorage.setItem('theme',nx)}catch(e){}themeFx();applyTheme()};
+$('#emreq').onclick=async()=>{const em=$('#em').value.trim();if(!em){say('ایمیل را وارد کن');return}$('#emreq').disabled=true;try{await api('POST','/api/email/request',{email:em});$('#emcode').hidden=false;say('کد تایید به ایمیل فرستاده شد (۱۰ دقیقه اعتبار دارد)')}catch(e){say('ارسال نشد ('+e.message+')')}$('#emreq').disabled=false};
+$('#emver').onclick=async()=>{try{await api('POST','/api/email/verify',{code:$('#emc').value.trim()});$('#emcode').hidden=true;$('#emc').value='';await loadSettings();say('ایمیل تایید شد ✓')}catch(e){say('تایید نشد ('+e.message+')')}};
+$('#emrm').onclick=()=>ask('ایمیل حذف بشه؟ آلارم‌هایی که ایمیل دارن فقط از تلگرام اعلان می‌گیرن.',async()=>{await api('POST','/api/email/remove');await loadSettings()});
+$('#tst').onclick=async()=>{const b=$('#tst');b.disabled=true;try{const r=await api('POST','/api/test-notify');const f=(n,x)=>n+': '+(x.skipped?'— (ایمیل تایید نشده)':x.ok?'✓ فرستاده شد':'✗ '+x.error);say(f('تلگرام',r.tg)+'\n'+f('ایمیل',r.email))}catch(e){say('تست انجام نشد ('+e.message+')')}b.disabled=false};
+$('#out').onclick=async()=>{try{await api('POST','/api/logout')}catch(e){}try{localStorage.removeItem('acache')}catch(e){}location.reload()};
+let am='login',codeSent=false,lgOn=false,mailOk=true;
+const EM=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function setMode(m){am=m;codeSent=false;const L=m==='login',R=m==='register',F=m==='reset';
+ $('#lgt').textContent=L?'ورود به پنل':R?'ثبت‌نام — ساخت حساب':'بازیابی رمز';
+ $('#f-u').hidden=F;$('#f-p2').hidden=L;$('#f-c').hidden=true;$('#f-k').hidden=!(R&&!mailOk);
+ $('#lpl').textContent=L?'رمز عبور':'رمز جدید (حداقل ۸ کاراکتر)';
+ $('#pw').autocomplete=L?'current-password':'new-password';
+ $('#lgo').textContent=L?'ورود':'دریافت کد در ایمیل';
+ $('#lsw').textContent=L?'رمز را فراموش کردم':'بازگشت به ورود';$('#lsw').hidden=R;
+ $('#lge').textContent='';$('#lge').style.color=''}
+async function showLogin(){if(lgOn)return;lgOn=true;let r={registered:true,mail:true};try{r=await(await fetch('/api/auth/state',{credentials:'same-origin'})).json()}catch(e){}
+ mailOk=r.mail!==false;setMode(r.registered?'login':'register');$('#lg').classList.add('on');setTimeout(()=>$('#lu').focus(),50)}
+function done(){['#pw','#pw2','#lc','#lkey'].forEach(i=>$(i).value='');lgOn=false;closeSh('#lg');$('#lgo').disabled=false;load();checkLegacy()}
+async function doAuth(){const b=$('#lgo'),u=$('#lu').value.trim(),pw=$('#pw').value,e=$('#lge');e.textContent='';e.style.color='';
+ const bad=m=>{e.textContent=m;b.disabled=false};b.disabled=true;
+ try{
+  if(am==='login'){await api('POST','/api/login',{email:u,password:pw});return done()}
+  if(!codeSent){
+   if(pw.length<8)return bad('رمز باید حداقل ۸ کاراکتر باشد.');
+   if(pw!==$('#pw2').value)return bad('تکرار رمز یکسان نیست.');
+   if(am==='register'&&!EM.test(u))return bad('ایمیل معتبر وارد کن.');
+   if(am==='register'&&!mailOk&&!$('#lkey').value.trim())return bad('کلید API سرویس ایمیل را وارد کن.');
+   await api('POST','/api/auth/code',{purpose:am,email:u,password:pw,lang:LANG,resendKey:$('#lkey').value.trim(),from:$('#lfrom').value.trim()});
+   codeSent=true;$('#f-c').hidden=false;b.textContent='تایید و ادامه';e.textContent='کد ۶ رقمی به ایمیلت فرستاده شد (پوشه‌ی اسپم را هم ببین).';e.style.color='var(--long)';$('#lc').focus();b.disabled=false;return}
+  await api('POST','/api/auth/confirm',{code:$('#lc').value.trim()});done()
+ }catch(x){const m=String(x.message);bad(m.includes('wrong password')?'ایمیل یا رمز اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('not allowed')?'این ایمیل اجازه‌ی ثبت‌نام ندارد.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('429')?'تلاش زیاد؛ کمی بعد دوباره امتحان کن.':'خطا ('+m+')')}}
+$('#lang').textContent=LANG==='en'?'فا':'EN';$('#lgl').textContent=LANG==='en'?'فارسی':'English';$('#lang').onclick=$('#lgl').onclick=()=>setLang(LANG==='en'?'fa':'en');
+$('#lgo').onclick=doAuth;$('#lsw').onclick=()=>setMode(am==='login'?'reset':'login');
+['lu','pw','pw2','lc'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')doAuth()}));
+async function loadUser(){try{const r=await api('GET','/api/auth/state');$('#acu').textContent=r.user;$('#aleg').hidden=!r.legacy;$('#akey').hidden=r.mail!==false}catch(e){}}
+let aemSent=false;
+$('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disabled=true;
+ try{
+  if(!aemSent){
+   if(!EM.test(em)){say('ایمیل معتبر وارد کن.');return}
+   if(!$('#ac').value){say('رمز فعلی را وارد کن.');return}
+   await api('POST','/api/auth/code',{purpose:'email',email:em,current:$('#ac').value,lang:LANG,resendKey:$('#akey').value.trim(),from:''});
+   aemSent=true;$('#acode').hidden=false;b.textContent='تایید ایمیل';say('کد به ایمیل جدید فرستاده شد (اسپم را هم ببین).')
+  }else{
+   await api('POST','/api/auth/confirm',{code:$('#acode').value.trim()});
+   aemSent=false;$('#acode').hidden=true;$('#acode').value='';$('#ae').value='';$('#ac').value='';b.textContent='ارسال کد به ایمیل جدید';say('ایمیل ثبت شد ✓');loadUser()
+  }
+ }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
+ finally{b.disabled=false}};
+function setSP(p){document.querySelectorAll('#sst button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));document.querySelectorAll('#ss .sp').forEach(x=>x.classList.toggle('on',x.dataset.p===p))}
+document.querySelectorAll('#sst button').forEach(b=>b.onclick=()=>setSP(b.dataset.p));
+async function checkLegacy(){try{const r=await api('GET','/api/auth/state');if(r.loggedIn)syncLang();if(r.loggedIn&&r.legacy){setSP('a');$('#ss').classList.add('on');loadUser();loadTg();loadSettings();say('حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.')}}catch(e){}}
+$('#acs').onclick=async()=>{if($('#ap').value.length<8){say('رمز جدید باید حداقل ۸ کاراکتر باشد.');return}try{await api('POST','/api/auth/change',{current:$('#ac').value,password:$('#ap').value});['#ac','#ap'].forEach(i=>$(i).value='');say('رمز تغییر کرد ✓');}catch(e){say(String(e.message).includes('wrong')?'رمز فعلی اشتباه است.':'ذخیره نشد ('+e.message+')')}};
+let tgs={};
+function paintTg(){const e=$('#tgst');e.className='st '+(tgs.connected?'ok':'bad');
+ e.textContent=tgs.connected?'✓ متصل: @'+tgs.bot:(tgs.hasToken?'ربات @'+tgs.bot+' ثبت شد — منتظر اتصال چت':(tgs.viaEnv?'از تنظیمات ورکر استفاده می‌شود (برای تغییر، توکن جدید بده)':'ربات متصل نیست'));
+ $('#tgstep').hidden=!(tgs.hasToken&&!tgs.connected);if(tgs.connected)$('#tgpick').innerHTML='';$('#tglink').href=tgs.link||'#';$('#tgoff').hidden=!tgs.hasToken}
+async function loadTg(){try{tgs=await api('GET','/api/tg')}catch(e){}paintTg()}
+$('#tgset').onclick=async()=>{const v=$('#tgt').value.trim();if(!v){say('توکن ربات را وارد کن');return}try{tgs=await api('POST','/api/tg/token',{token:v});$('#tgt').value='';paintTg();if(tgs.wh)say('یک Webhook قدیمی روی این ربات بود و حذف شد. حالا لینک را بزن و در تلگرام Start را (دوباره) بزن.')}catch(e){say(/invalid|rejected/.test(e.message)?'توکن معتبر نیست.':'ثبت نشد ('+e.message+')')}};
+$('#tgdet').onclick=async()=>{try{const r=await api('POST','/api/tg/detect');tgs=r;paintTg();
+ if(r.pick&&r.pick.length){$('#tgpick').innerHTML='<div class="st" style="margin:6px 0">این چت‌ها به ربات پیام داده‌اند. چت خودت را انتخاب کن:</div>'+r.pick.map(c=>'<button class="lk" style="display:block" data-c="'+esc(c.id)+'">'+esc(c.name)+(c.username?' (@'+esc(c.username)+')':'')+'</button>').join('');return}
+ say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}
+ catch(e){const m=String(e.message);say(m.includes('404')?'هنوز پیامی در ربات ندیدم. در تلگرام به ربات @'+tgs.bot+' یک پیام بفرست (مثلاً /start) و دوباره «تشخیص» را بزن.':/other getUpdates|Conflict/i.test(m)?'یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.':'تشخیص انجام نشد ('+m+')')}};
+$('#tgpick').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{tgs=await api('POST','/api/tg/choose',{chat:b.dataset.c});paintTg();say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}catch(x){say('انجام نشد ('+x.message+')')}};
+$('#tgoff').onclick=()=>ask('ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.',async()=>{tgs=await api('POST','/api/tg/disconnect');paintTg()});
+async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=$('#st');
+ if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
+ const m=Math.round((r.now-r.t)/60000);
+ if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+ else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+ else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
+async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
+ if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
+ const act=alerts.filter(a=>!doneA(a));if(!act.length)return;const cs=[...new Set(act.map(a=>a.coin))];
+ try{prices=await api('GET','/api/prices?coins='+cs.join(','))}catch(e){}
+ act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
+  const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
+  add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
+$('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
+async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
+markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
+try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArray(c.alerts)){alerts=c.alerts.filter(a=>a&&Array.isArray(a.targets)&&a.targets.length);if(Array.isArray(c.cats))cats=c.cats;render();paintChips()}}catch(e){}
+load();setTimeout(checkLegacy,1200);setTimeout(()=>{if(tab==='a'&&!witems.length&&!sitems.length)loadW()},4000);setTimeout(()=>document.body.classList.remove('boot'),450);
+setInterval(()=>{if(!document.hidden&&tab==='a')refresh()},60000);
+setInterval(()=>{if(!document.hidden&&tab==='a')liveTick()},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab==='a'&&Date.now()-_aAt>15000)refresh()});
+(()=>{let t=location.hash.slice(1);if(!(t.length===1&&TABS.includes(t))){try{t=localStorage.getItem('tab')||''}catch(e){t=''}}if(t.length===1&&TABS.includes(t)&&t!=='a')show(t)})();
+</script></body></html>`;
+
+
+// The page has no per-user data, so the browser may keep it and only revalidate (304 = a few bytes instead of ~170 KB).
+let _h = 2166136261;
+for (let i = 0; i < APP_HTML.length; i += 7) _h = Math.imul(_h ^ APP_HTML.charCodeAt(i), 16777619);
+const HTML_ETAG = '"' + (_h >>> 0).toString(36) + "-" + APP_HTML.length.toString(36) + '"';
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      try { return await handleApi(request, env, url); }
+      catch (e) {
+        const m = String((e && e.message) || e);
+        console.log("[api error]", m);
+        return new Response(JSON.stringify({ error: /limit exceeded/i.test(m) ? "kv limit: daily write quota is used up, try again after 00:00 UTC" : m.slice(0, 200) }), { status: 500, headers: { "content-type": "application/json" } });
+      }
+    }
+    if (url.pathname === "/manifest.webmanifest") return staticRes(MANIFEST, "application/manifest+json");
+    if (url.pathname === "/icon.svg") return staticRes(ICON_SVG, "image/svg+xml");
+    if (url.pathname === "/icon-192.png") return staticRes(b64(ICON_192), "image/png");
+    if (url.pathname === "/icon-512.png") return staticRes(b64(ICON_512), "image/png");
+    if (url.pathname === "/sw.js") return new Response(SW_JS, { headers: { "content-type": "text/javascript", "cache-control": "no-cache", "service-worker-allowed": "/" } });
+    if (url.pathname === "/" || url.pathname === "/app") {
+      if (request.headers.get("if-none-match") === HTML_ETAG) return new Response(null, { status: 304, headers: { etag: HTML_ETAG, "cache-control": "no-cache" } });
+      return new Response(APP_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+          etag: HTML_ETAG,
+          "x-robots-tag": "noindex, nofollow",
+          "x-frame-options": "DENY",
+          ...SEC_HEADERS,
+        },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledCheck(env));
+  },
+};+cf(risk$)+' ÷ ('+lv+' × ('+cf(sl,4)+'% + '+cf(totalFeePct*100,4)+'% fees)) = 
+}
+document.addEventListener('input',e=>{if(e.target.closest('#p-c'))calc()});
+(function(){
+ let d=null,ly=0,raf=0;
+ const L=$('#list');
+ let lx=0;const place=y=>{const cs=[...L.querySelectorAll('.card:not(.drag)')];if(!cs.length)return;const R=cs.map(o=>o.getBoundingClientRect()),multi=new Set(R.map(r=>Math.round(r.left))).size>1;let bi=0,bd=1e18;R.forEach((r,i)=>{const dx=lx-(r.left+r.width/2),dy=y-(r.top+r.height/2),dd=dx*dx+dy*dy;if(dd<bd){bd=dd;bi=i}});const r=R[bi],before=multi?(lx>r.left+r.width/2):(y<r.top+r.height/2);before?L.insertBefore(d.ph,cs[bi]):cs[bi].after(d.ph)};
+ const loop=()=>{if(!d)return;if(ly<90)scrollBy(0,-14);else if(ly>innerHeight-90)scrollBy(0,14);place(ly);raf=requestAnimationFrame(loop)};
+ L.addEventListener('pointerdown',e=>{const h=e.target.closest('.dh');if(!h)return;const c=h.closest('.card');if(L.querySelectorAll('.card').length<2)return;e.preventDefault();
+  const r=c.getBoundingClientRect();d={c,off:e.clientY-r.top,ox:e.clientX-r.left,ph:document.createElement('div')};
+  d.ph.className='ph';d.ph.style.height=r.height+'px';c.after(d.ph);
+  c.classList.add('drag');c.style.cssText='position:fixed;z-index:30;width:'+r.width+'px;left:'+r.left+'px;top:'+r.top+'px';
+  try{h.setPointerCapture(e.pointerId)}catch(_){}
+  document.body.style.userSelect='none';ly=e.clientY;lx=e.clientX;raf=requestAnimationFrame(loop)});
+ document.addEventListener('pointermove',e=>{if(!d)return;ly=e.clientY;lx=e.clientX;d.c.style.top=(e.clientY-d.off)+'px';d.c.style.left=(e.clientX-d.ox)+'px';place(ly)});
+ const end=ok=>{if(!d)return;cancelAnimationFrame(raf);const c=d.c;d.ph.replaceWith(c);c.classList.remove('drag');c.style.cssText='';d=null;document.body.style.userSelect='';
+  if(!ok){render();return}
+  if(fltOn()){say('برای جابه‌جایی، اول فیلترها را پاک کن');render();return}
+  const ids=[...L.querySelectorAll('.card')].map(x=>+x.dataset.id),m=new Map(alerts.map(a=>[a.id,a]));alerts=ids.map(i=>m.get(i)).filter(Boolean);
+  api('POST','/api/alerts/reorder',{ids}).catch(()=>{say('جابه‌جایی ذخیره نشد');load()})};
+ document.addEventListener('pointerup',()=>end(true));document.addEventListener('pointercancel',()=>end(false));
+})();
+let st={email:'',verified:false,provider:false};
+function paintSettings(){const c=$('#c-em');c.disabled=!st.verified;if(!st.verified)c.checked=false;$('#c-emh').textContent=st.verified?'':'(اول ایمیل را در ⚙️ تنظیمات تایید کن)';
+ const e=$('#emst');e.className='st '+(st.verified?'ok':'bad');e.textContent=st.verified?'✓ ایمیل تایید شده: '+st.email:(st.provider?'ایمیلی تایید نشده':'⚠️ سرویس ایمیل تنظیم نشده');$('#emrm').hidden=!st.verified}
+async function loadSettings(s0){try{st=s0||await api('GET','/api/settings')}catch(e){}paintSettings()}
+$('#gear').onclick=()=>{setSP('n');if(Date.now()-_setAt>45000){_setAt=Date.now();loadSettings();loadUser();loadTg()}$('#ss').classList.add('on')};
+$('#ssx').onclick=()=>closeSh('#ss');
+$('#tbtn').onclick=()=>{let m='system';try{m=localStorage.getItem('theme')||'system'}catch(e){}const nx=m==='system'?'light':m==='light'?'dark':'system';try{localStorage.setItem('theme',nx)}catch(e){}themeFx();applyTheme()};
+$('#emreq').onclick=async()=>{const em=$('#em').value.trim();if(!em){say('ایمیل را وارد کن');return}$('#emreq').disabled=true;try{await api('POST','/api/email/request',{email:em});$('#emcode').hidden=false;say('کد تایید به ایمیل فرستاده شد (۱۰ دقیقه اعتبار دارد)')}catch(e){say('ارسال نشد ('+e.message+')')}$('#emreq').disabled=false};
+$('#emver').onclick=async()=>{try{await api('POST','/api/email/verify',{code:$('#emc').value.trim()});$('#emcode').hidden=true;$('#emc').value='';await loadSettings();say('ایمیل تایید شد ✓')}catch(e){say('تایید نشد ('+e.message+')')}};
+$('#emrm').onclick=()=>ask('ایمیل حذف بشه؟ آلارم‌هایی که ایمیل دارن فقط از تلگرام اعلان می‌گیرن.',async()=>{await api('POST','/api/email/remove');await loadSettings()});
+$('#tst').onclick=async()=>{const b=$('#tst');b.disabled=true;try{const r=await api('POST','/api/test-notify');const f=(n,x)=>n+': '+(x.skipped?'— (ایمیل تایید نشده)':x.ok?'✓ فرستاده شد':'✗ '+x.error);say(f('تلگرام',r.tg)+'\n'+f('ایمیل',r.email))}catch(e){say('تست انجام نشد ('+e.message+')')}b.disabled=false};
+$('#out').onclick=async()=>{try{await api('POST','/api/logout')}catch(e){}try{localStorage.removeItem('acache')}catch(e){}location.reload()};
+let am='login',codeSent=false,lgOn=false,mailOk=true;
+const EM=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function setMode(m){am=m;codeSent=false;const L=m==='login',R=m==='register',F=m==='reset';
+ $('#lgt').textContent=L?'ورود به پنل':R?'ثبت‌نام — ساخت حساب':'بازیابی رمز';
+ $('#f-u').hidden=F;$('#f-p2').hidden=L;$('#f-c').hidden=true;$('#f-k').hidden=!(R&&!mailOk);
+ $('#lpl').textContent=L?'رمز عبور':'رمز جدید (حداقل ۸ کاراکتر)';
+ $('#pw').autocomplete=L?'current-password':'new-password';
+ $('#lgo').textContent=L?'ورود':'دریافت کد در ایمیل';
+ $('#lsw').textContent=L?'رمز را فراموش کردم':'بازگشت به ورود';$('#lsw').hidden=R;
+ $('#lge').textContent='';$('#lge').style.color=''}
+async function showLogin(){if(lgOn)return;lgOn=true;let r={registered:true,mail:true};try{r=await(await fetch('/api/auth/state',{credentials:'same-origin'})).json()}catch(e){}
+ mailOk=r.mail!==false;setMode(r.registered?'login':'register');$('#lg').classList.add('on');setTimeout(()=>$('#lu').focus(),50)}
+function done(){['#pw','#pw2','#lc','#lkey'].forEach(i=>$(i).value='');lgOn=false;closeSh('#lg');$('#lgo').disabled=false;load();checkLegacy()}
+async function doAuth(){const b=$('#lgo'),u=$('#lu').value.trim(),pw=$('#pw').value,e=$('#lge');e.textContent='';e.style.color='';
+ const bad=m=>{e.textContent=m;b.disabled=false};b.disabled=true;
+ try{
+  if(am==='login'){await api('POST','/api/login',{email:u,password:pw});return done()}
+  if(!codeSent){
+   if(pw.length<8)return bad('رمز باید حداقل ۸ کاراکتر باشد.');
+   if(pw!==$('#pw2').value)return bad('تکرار رمز یکسان نیست.');
+   if(am==='register'&&!EM.test(u))return bad('ایمیل معتبر وارد کن.');
+   if(am==='register'&&!mailOk&&!$('#lkey').value.trim())return bad('کلید API سرویس ایمیل را وارد کن.');
+   await api('POST','/api/auth/code',{purpose:am,email:u,password:pw,lang:LANG,resendKey:$('#lkey').value.trim(),from:$('#lfrom').value.trim()});
+   codeSent=true;$('#f-c').hidden=false;b.textContent='تایید و ادامه';e.textContent='کد ۶ رقمی به ایمیلت فرستاده شد (پوشه‌ی اسپم را هم ببین).';e.style.color='var(--long)';$('#lc').focus();b.disabled=false;return}
+  await api('POST','/api/auth/confirm',{code:$('#lc').value.trim()});done()
+ }catch(x){const m=String(x.message);bad(m.includes('wrong password')?'ایمیل یا رمز اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('not allowed')?'این ایمیل اجازه‌ی ثبت‌نام ندارد.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('429')?'تلاش زیاد؛ کمی بعد دوباره امتحان کن.':'خطا ('+m+')')}}
+$('#lang').textContent=LANG==='en'?'فا':'EN';$('#lgl').textContent=LANG==='en'?'فارسی':'English';$('#lang').onclick=$('#lgl').onclick=()=>setLang(LANG==='en'?'fa':'en');
+$('#lgo').onclick=doAuth;$('#lsw').onclick=()=>setMode(am==='login'?'reset':'login');
+['lu','pw','pw2','lc'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')doAuth()}));
+async function loadUser(){try{const r=await api('GET','/api/auth/state');$('#acu').textContent=r.user;$('#aleg').hidden=!r.legacy;$('#akey').hidden=r.mail!==false}catch(e){}}
+let aemSent=false;
+$('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disabled=true;
+ try{
+  if(!aemSent){
+   if(!EM.test(em)){say('ایمیل معتبر وارد کن.');return}
+   if(!$('#ac').value){say('رمز فعلی را وارد کن.');return}
+   await api('POST','/api/auth/code',{purpose:'email',email:em,current:$('#ac').value,lang:LANG,resendKey:$('#akey').value.trim(),from:''});
+   aemSent=true;$('#acode').hidden=false;b.textContent='تایید ایمیل';say('کد به ایمیل جدید فرستاده شد (اسپم را هم ببین).')
+  }else{
+   await api('POST','/api/auth/confirm',{code:$('#acode').value.trim()});
+   aemSent=false;$('#acode').hidden=true;$('#acode').value='';$('#ae').value='';$('#ac').value='';b.textContent='ارسال کد به ایمیل جدید';say('ایمیل ثبت شد ✓');loadUser()
+  }
+ }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
+ finally{b.disabled=false}};
+function setSP(p){document.querySelectorAll('#sst button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));document.querySelectorAll('#ss .sp').forEach(x=>x.classList.toggle('on',x.dataset.p===p))}
+document.querySelectorAll('#sst button').forEach(b=>b.onclick=()=>setSP(b.dataset.p));
+async function checkLegacy(){try{const r=await api('GET','/api/auth/state');if(r.loggedIn)syncLang();if(r.loggedIn&&r.legacy){setSP('a');$('#ss').classList.add('on');loadUser();loadTg();loadSettings();say('حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.')}}catch(e){}}
+$('#acs').onclick=async()=>{if($('#ap').value.length<8){say('رمز جدید باید حداقل ۸ کاراکتر باشد.');return}try{await api('POST','/api/auth/change',{current:$('#ac').value,password:$('#ap').value});['#ac','#ap'].forEach(i=>$(i).value='');say('رمز تغییر کرد ✓');}catch(e){say(String(e.message).includes('wrong')?'رمز فعلی اشتباه است.':'ذخیره نشد ('+e.message+')')}};
+let tgs={};
+function paintTg(){const e=$('#tgst');e.className='st '+(tgs.connected?'ok':'bad');
+ e.textContent=tgs.connected?'✓ متصل: @'+tgs.bot:(tgs.hasToken?'ربات @'+tgs.bot+' ثبت شد — منتظر اتصال چت':(tgs.viaEnv?'از تنظیمات ورکر استفاده می‌شود (برای تغییر، توکن جدید بده)':'ربات متصل نیست'));
+ $('#tgstep').hidden=!(tgs.hasToken&&!tgs.connected);if(tgs.connected)$('#tgpick').innerHTML='';$('#tglink').href=tgs.link||'#';$('#tgoff').hidden=!tgs.hasToken}
+async function loadTg(){try{tgs=await api('GET','/api/tg')}catch(e){}paintTg()}
+$('#tgset').onclick=async()=>{const v=$('#tgt').value.trim();if(!v){say('توکن ربات را وارد کن');return}try{tgs=await api('POST','/api/tg/token',{token:v});$('#tgt').value='';paintTg();if(tgs.wh)say('یک Webhook قدیمی روی این ربات بود و حذف شد. حالا لینک را بزن و در تلگرام Start را (دوباره) بزن.')}catch(e){say(/invalid|rejected/.test(e.message)?'توکن معتبر نیست.':'ثبت نشد ('+e.message+')')}};
+$('#tgdet').onclick=async()=>{try{const r=await api('POST','/api/tg/detect');tgs=r;paintTg();
+ if(r.pick&&r.pick.length){$('#tgpick').innerHTML='<div class="st" style="margin:6px 0">این چت‌ها به ربات پیام داده‌اند. چت خودت را انتخاب کن:</div>'+r.pick.map(c=>'<button class="lk" style="display:block" data-c="'+esc(c.id)+'">'+esc(c.name)+(c.username?' (@'+esc(c.username)+')':'')+'</button>').join('');return}
+ say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}
+ catch(e){const m=String(e.message);say(m.includes('404')?'هنوز پیامی در ربات ندیدم. در تلگرام به ربات @'+tgs.bot+' یک پیام بفرست (مثلاً /start) و دوباره «تشخیص» را بزن.':/other getUpdates|Conflict/i.test(m)?'یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.':'تشخیص انجام نشد ('+m+')')}};
+$('#tgpick').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{tgs=await api('POST','/api/tg/choose',{chat:b.dataset.c});paintTg();say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}catch(x){say('انجام نشد ('+x.message+')')}};
+$('#tgoff').onclick=()=>ask('ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.',async()=>{tgs=await api('POST','/api/tg/disconnect');paintTg()});
+async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=$('#st');
+ if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
+ const m=Math.round((r.now-r.t)/60000);
+ if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+ else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+ else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
+async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
+ if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
+ const act=alerts.filter(a=>!doneA(a));if(!act.length)return;const cs=[...new Set(act.map(a=>a.coin))];
+ try{prices=await api('GET','/api/prices?coins='+cs.join(','))}catch(e){}
+ act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
+  const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
+  add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
+$('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
+async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
+markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
+try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArray(c.alerts)){alerts=c.alerts.filter(a=>a&&Array.isArray(a.targets)&&a.targets.length);if(Array.isArray(c.cats))cats=c.cats;render();paintChips()}}catch(e){}
+load();setTimeout(checkLegacy,1200);setTimeout(()=>{if(tab==='a'&&!witems.length&&!sitems.length)loadW()},4000);setTimeout(()=>document.body.classList.remove('boot'),450);
+setInterval(()=>{if(!document.hidden&&tab==='a')refresh()},60000);
+setInterval(()=>{if(!document.hidden&&tab==='a')liveTick()},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab==='a'&&Date.now()-_aAt>15000)refresh()});
+(()=>{let t=location.hash.slice(1);if(!(t.length===1&&TABS.includes(t))){try{t=localStorage.getItem('tab')||''}catch(e){t=''}}if(t.length===1&&TABS.includes(t)&&t!=='a')show(t)})();
+</script></body></html>`;
+
+
+// The page has no per-user data, so the browser may keep it and only revalidate (304 = a few bytes instead of ~170 KB).
+let _h = 2166136261;
+for (let i = 0; i < APP_HTML.length; i += 7) _h = Math.imul(_h ^ APP_HTML.charCodeAt(i), 16777619);
+const HTML_ETAG = '"' + (_h >>> 0).toString(36) + "-" + APP_HTML.length.toString(36) + '"';
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      try { return await handleApi(request, env, url); }
+      catch (e) {
+        const m = String((e && e.message) || e);
+        console.log("[api error]", m);
+        return new Response(JSON.stringify({ error: /limit exceeded/i.test(m) ? "kv limit: daily write quota is used up, try again after 00:00 UTC" : m.slice(0, 200) }), { status: 500, headers: { "content-type": "application/json" } });
+      }
+    }
+    if (url.pathname === "/manifest.webmanifest") return staticRes(MANIFEST, "application/manifest+json");
+    if (url.pathname === "/icon.svg") return staticRes(ICON_SVG, "image/svg+xml");
+    if (url.pathname === "/icon-192.png") return staticRes(b64(ICON_192), "image/png");
+    if (url.pathname === "/icon-512.png") return staticRes(b64(ICON_512), "image/png");
+    if (url.pathname === "/sw.js") return new Response(SW_JS, { headers: { "content-type": "text/javascript", "cache-control": "no-cache", "service-worker-allowed": "/" } });
+    if (url.pathname === "/" || url.pathname === "/app") {
+      if (request.headers.get("if-none-match") === HTML_ETAG) return new Response(null, { status: 304, headers: { etag: HTML_ETAG, "cache-control": "no-cache" } });
+      return new Response(APP_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+          etag: HTML_ETAG,
+          "x-robots-tag": "noindex, nofollow",
+          "x-frame-options": "DENY",
+          ...SEC_HEADERS,
+        },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledCheck(env));
+  },
+};+cf(size)+'<br>Notional = 
+}
+document.addEventListener('input',e=>{if(e.target.closest('#p-c'))calc()});
+(function(){
+ let d=null,ly=0,raf=0;
+ const L=$('#list');
+ let lx=0;const place=y=>{const cs=[...L.querySelectorAll('.card:not(.drag)')];if(!cs.length)return;const R=cs.map(o=>o.getBoundingClientRect()),multi=new Set(R.map(r=>Math.round(r.left))).size>1;let bi=0,bd=1e18;R.forEach((r,i)=>{const dx=lx-(r.left+r.width/2),dy=y-(r.top+r.height/2),dd=dx*dx+dy*dy;if(dd<bd){bd=dd;bi=i}});const r=R[bi],before=multi?(lx>r.left+r.width/2):(y<r.top+r.height/2);before?L.insertBefore(d.ph,cs[bi]):cs[bi].after(d.ph)};
+ const loop=()=>{if(!d)return;if(ly<90)scrollBy(0,-14);else if(ly>innerHeight-90)scrollBy(0,14);place(ly);raf=requestAnimationFrame(loop)};
+ L.addEventListener('pointerdown',e=>{const h=e.target.closest('.dh');if(!h)return;const c=h.closest('.card');if(L.querySelectorAll('.card').length<2)return;e.preventDefault();
+  const r=c.getBoundingClientRect();d={c,off:e.clientY-r.top,ox:e.clientX-r.left,ph:document.createElement('div')};
+  d.ph.className='ph';d.ph.style.height=r.height+'px';c.after(d.ph);
+  c.classList.add('drag');c.style.cssText='position:fixed;z-index:30;width:'+r.width+'px;left:'+r.left+'px;top:'+r.top+'px';
+  try{h.setPointerCapture(e.pointerId)}catch(_){}
+  document.body.style.userSelect='none';ly=e.clientY;lx=e.clientX;raf=requestAnimationFrame(loop)});
+ document.addEventListener('pointermove',e=>{if(!d)return;ly=e.clientY;lx=e.clientX;d.c.style.top=(e.clientY-d.off)+'px';d.c.style.left=(e.clientX-d.ox)+'px';place(ly)});
+ const end=ok=>{if(!d)return;cancelAnimationFrame(raf);const c=d.c;d.ph.replaceWith(c);c.classList.remove('drag');c.style.cssText='';d=null;document.body.style.userSelect='';
+  if(!ok){render();return}
+  if(fltOn()){say('برای جابه‌جایی، اول فیلترها را پاک کن');render();return}
+  const ids=[...L.querySelectorAll('.card')].map(x=>+x.dataset.id),m=new Map(alerts.map(a=>[a.id,a]));alerts=ids.map(i=>m.get(i)).filter(Boolean);
+  api('POST','/api/alerts/reorder',{ids}).catch(()=>{say('جابه‌جایی ذخیره نشد');load()})};
+ document.addEventListener('pointerup',()=>end(true));document.addEventListener('pointercancel',()=>end(false));
+})();
+let st={email:'',verified:false,provider:false};
+function paintSettings(){const c=$('#c-em');c.disabled=!st.verified;if(!st.verified)c.checked=false;$('#c-emh').textContent=st.verified?'':'(اول ایمیل را در ⚙️ تنظیمات تایید کن)';
+ const e=$('#emst');e.className='st '+(st.verified?'ok':'bad');e.textContent=st.verified?'✓ ایمیل تایید شده: '+st.email:(st.provider?'ایمیلی تایید نشده':'⚠️ سرویس ایمیل تنظیم نشده');$('#emrm').hidden=!st.verified}
+async function loadSettings(s0){try{st=s0||await api('GET','/api/settings')}catch(e){}paintSettings()}
+$('#gear').onclick=()=>{setSP('n');if(Date.now()-_setAt>45000){_setAt=Date.now();loadSettings();loadUser();loadTg()}$('#ss').classList.add('on')};
+$('#ssx').onclick=()=>closeSh('#ss');
+$('#tbtn').onclick=()=>{let m='system';try{m=localStorage.getItem('theme')||'system'}catch(e){}const nx=m==='system'?'light':m==='light'?'dark':'system';try{localStorage.setItem('theme',nx)}catch(e){}themeFx();applyTheme()};
+$('#emreq').onclick=async()=>{const em=$('#em').value.trim();if(!em){say('ایمیل را وارد کن');return}$('#emreq').disabled=true;try{await api('POST','/api/email/request',{email:em});$('#emcode').hidden=false;say('کد تایید به ایمیل فرستاده شد (۱۰ دقیقه اعتبار دارد)')}catch(e){say('ارسال نشد ('+e.message+')')}$('#emreq').disabled=false};
+$('#emver').onclick=async()=>{try{await api('POST','/api/email/verify',{code:$('#emc').value.trim()});$('#emcode').hidden=true;$('#emc').value='';await loadSettings();say('ایمیل تایید شد ✓')}catch(e){say('تایید نشد ('+e.message+')')}};
+$('#emrm').onclick=()=>ask('ایمیل حذف بشه؟ آلارم‌هایی که ایمیل دارن فقط از تلگرام اعلان می‌گیرن.',async()=>{await api('POST','/api/email/remove');await loadSettings()});
+$('#tst').onclick=async()=>{const b=$('#tst');b.disabled=true;try{const r=await api('POST','/api/test-notify');const f=(n,x)=>n+': '+(x.skipped?'— (ایمیل تایید نشده)':x.ok?'✓ فرستاده شد':'✗ '+x.error);say(f('تلگرام',r.tg)+'\n'+f('ایمیل',r.email))}catch(e){say('تست انجام نشد ('+e.message+')')}b.disabled=false};
+$('#out').onclick=async()=>{try{await api('POST','/api/logout')}catch(e){}try{localStorage.removeItem('acache')}catch(e){}location.reload()};
+let am='login',codeSent=false,lgOn=false,mailOk=true;
+const EM=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function setMode(m){am=m;codeSent=false;const L=m==='login',R=m==='register',F=m==='reset';
+ $('#lgt').textContent=L?'ورود به پنل':R?'ثبت‌نام — ساخت حساب':'بازیابی رمز';
+ $('#f-u').hidden=F;$('#f-p2').hidden=L;$('#f-c').hidden=true;$('#f-k').hidden=!(R&&!mailOk);
+ $('#lpl').textContent=L?'رمز عبور':'رمز جدید (حداقل ۸ کاراکتر)';
+ $('#pw').autocomplete=L?'current-password':'new-password';
+ $('#lgo').textContent=L?'ورود':'دریافت کد در ایمیل';
+ $('#lsw').textContent=L?'رمز را فراموش کردم':'بازگشت به ورود';$('#lsw').hidden=R;
+ $('#lge').textContent='';$('#lge').style.color=''}
+async function showLogin(){if(lgOn)return;lgOn=true;let r={registered:true,mail:true};try{r=await(await fetch('/api/auth/state',{credentials:'same-origin'})).json()}catch(e){}
+ mailOk=r.mail!==false;setMode(r.registered?'login':'register');$('#lg').classList.add('on');setTimeout(()=>$('#lu').focus(),50)}
+function done(){['#pw','#pw2','#lc','#lkey'].forEach(i=>$(i).value='');lgOn=false;closeSh('#lg');$('#lgo').disabled=false;load();checkLegacy()}
+async function doAuth(){const b=$('#lgo'),u=$('#lu').value.trim(),pw=$('#pw').value,e=$('#lge');e.textContent='';e.style.color='';
+ const bad=m=>{e.textContent=m;b.disabled=false};b.disabled=true;
+ try{
+  if(am==='login'){await api('POST','/api/login',{email:u,password:pw});return done()}
+  if(!codeSent){
+   if(pw.length<8)return bad('رمز باید حداقل ۸ کاراکتر باشد.');
+   if(pw!==$('#pw2').value)return bad('تکرار رمز یکسان نیست.');
+   if(am==='register'&&!EM.test(u))return bad('ایمیل معتبر وارد کن.');
+   if(am==='register'&&!mailOk&&!$('#lkey').value.trim())return bad('کلید API سرویس ایمیل را وارد کن.');
+   await api('POST','/api/auth/code',{purpose:am,email:u,password:pw,lang:LANG,resendKey:$('#lkey').value.trim(),from:$('#lfrom').value.trim()});
+   codeSent=true;$('#f-c').hidden=false;b.textContent='تایید و ادامه';e.textContent='کد ۶ رقمی به ایمیلت فرستاده شد (پوشه‌ی اسپم را هم ببین).';e.style.color='var(--long)';$('#lc').focus();b.disabled=false;return}
+  await api('POST','/api/auth/confirm',{code:$('#lc').value.trim()});done()
+ }catch(x){const m=String(x.message);bad(m.includes('wrong password')?'ایمیل یا رمز اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('not allowed')?'این ایمیل اجازه‌ی ثبت‌نام ندارد.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('429')?'تلاش زیاد؛ کمی بعد دوباره امتحان کن.':'خطا ('+m+')')}}
+$('#lang').textContent=LANG==='en'?'فا':'EN';$('#lgl').textContent=LANG==='en'?'فارسی':'English';$('#lang').onclick=$('#lgl').onclick=()=>setLang(LANG==='en'?'fa':'en');
+$('#lgo').onclick=doAuth;$('#lsw').onclick=()=>setMode(am==='login'?'reset':'login');
+['lu','pw','pw2','lc'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')doAuth()}));
+async function loadUser(){try{const r=await api('GET','/api/auth/state');$('#acu').textContent=r.user;$('#aleg').hidden=!r.legacy;$('#akey').hidden=r.mail!==false}catch(e){}}
+let aemSent=false;
+$('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disabled=true;
+ try{
+  if(!aemSent){
+   if(!EM.test(em)){say('ایمیل معتبر وارد کن.');return}
+   if(!$('#ac').value){say('رمز فعلی را وارد کن.');return}
+   await api('POST','/api/auth/code',{purpose:'email',email:em,current:$('#ac').value,lang:LANG,resendKey:$('#akey').value.trim(),from:''});
+   aemSent=true;$('#acode').hidden=false;b.textContent='تایید ایمیل';say('کد به ایمیل جدید فرستاده شد (اسپم را هم ببین).')
+  }else{
+   await api('POST','/api/auth/confirm',{code:$('#acode').value.trim()});
+   aemSent=false;$('#acode').hidden=true;$('#acode').value='';$('#ae').value='';$('#ac').value='';b.textContent='ارسال کد به ایمیل جدید';say('ایمیل ثبت شد ✓');loadUser()
+  }
+ }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
+ finally{b.disabled=false}};
+function setSP(p){document.querySelectorAll('#sst button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));document.querySelectorAll('#ss .sp').forEach(x=>x.classList.toggle('on',x.dataset.p===p))}
+document.querySelectorAll('#sst button').forEach(b=>b.onclick=()=>setSP(b.dataset.p));
+async function checkLegacy(){try{const r=await api('GET','/api/auth/state');if(r.loggedIn)syncLang();if(r.loggedIn&&r.legacy){setSP('a');$('#ss').classList.add('on');loadUser();loadTg();loadSettings();say('حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.')}}catch(e){}}
+$('#acs').onclick=async()=>{if($('#ap').value.length<8){say('رمز جدید باید حداقل ۸ کاراکتر باشد.');return}try{await api('POST','/api/auth/change',{current:$('#ac').value,password:$('#ap').value});['#ac','#ap'].forEach(i=>$(i).value='');say('رمز تغییر کرد ✓');}catch(e){say(String(e.message).includes('wrong')?'رمز فعلی اشتباه است.':'ذخیره نشد ('+e.message+')')}};
+let tgs={};
+function paintTg(){const e=$('#tgst');e.className='st '+(tgs.connected?'ok':'bad');
+ e.textContent=tgs.connected?'✓ متصل: @'+tgs.bot:(tgs.hasToken?'ربات @'+tgs.bot+' ثبت شد — منتظر اتصال چت':(tgs.viaEnv?'از تنظیمات ورکر استفاده می‌شود (برای تغییر، توکن جدید بده)':'ربات متصل نیست'));
+ $('#tgstep').hidden=!(tgs.hasToken&&!tgs.connected);if(tgs.connected)$('#tgpick').innerHTML='';$('#tglink').href=tgs.link||'#';$('#tgoff').hidden=!tgs.hasToken}
+async function loadTg(){try{tgs=await api('GET','/api/tg')}catch(e){}paintTg()}
+$('#tgset').onclick=async()=>{const v=$('#tgt').value.trim();if(!v){say('توکن ربات را وارد کن');return}try{tgs=await api('POST','/api/tg/token',{token:v});$('#tgt').value='';paintTg();if(tgs.wh)say('یک Webhook قدیمی روی این ربات بود و حذف شد. حالا لینک را بزن و در تلگرام Start را (دوباره) بزن.')}catch(e){say(/invalid|rejected/.test(e.message)?'توکن معتبر نیست.':'ثبت نشد ('+e.message+')')}};
+$('#tgdet').onclick=async()=>{try{const r=await api('POST','/api/tg/detect');tgs=r;paintTg();
+ if(r.pick&&r.pick.length){$('#tgpick').innerHTML='<div class="st" style="margin:6px 0">این چت‌ها به ربات پیام داده‌اند. چت خودت را انتخاب کن:</div>'+r.pick.map(c=>'<button class="lk" style="display:block" data-c="'+esc(c.id)+'">'+esc(c.name)+(c.username?' (@'+esc(c.username)+')':'')+'</button>').join('');return}
+ say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}
+ catch(e){const m=String(e.message);say(m.includes('404')?'هنوز پیامی در ربات ندیدم. در تلگرام به ربات @'+tgs.bot+' یک پیام بفرست (مثلاً /start) و دوباره «تشخیص» را بزن.':/other getUpdates|Conflict/i.test(m)?'یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.':'تشخیص انجام نشد ('+m+')')}};
+$('#tgpick').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{tgs=await api('POST','/api/tg/choose',{chat:b.dataset.c});paintTg();say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}catch(x){say('انجام نشد ('+x.message+')')}};
+$('#tgoff').onclick=()=>ask('ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.',async()=>{tgs=await api('POST','/api/tg/disconnect');paintTg()});
+async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=$('#st');
+ if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
+ const m=Math.round((r.now-r.t)/60000);
+ if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+ else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+ else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
+async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
+ if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
+ const act=alerts.filter(a=>!doneA(a));if(!act.length)return;const cs=[...new Set(act.map(a=>a.coin))];
+ try{prices=await api('GET','/api/prices?coins='+cs.join(','))}catch(e){}
+ act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
+  const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
+  add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
+$('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
+async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
+markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
+try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArray(c.alerts)){alerts=c.alerts.filter(a=>a&&Array.isArray(a.targets)&&a.targets.length);if(Array.isArray(c.cats))cats=c.cats;render();paintChips()}}catch(e){}
+load();setTimeout(checkLegacy,1200);setTimeout(()=>{if(tab==='a'&&!witems.length&&!sitems.length)loadW()},4000);setTimeout(()=>document.body.classList.remove('boot'),450);
+setInterval(()=>{if(!document.hidden&&tab==='a')refresh()},60000);
+setInterval(()=>{if(!document.hidden&&tab==='a')liveTick()},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab==='a'&&Date.now()-_aAt>15000)refresh()});
+(()=>{let t=location.hash.slice(1);if(!(t.length===1&&TABS.includes(t))){try{t=localStorage.getItem('tab')||''}catch(e){t=''}}if(t.length===1&&TABS.includes(t)&&t!=='a')show(t)})();
+</script></body></html>`;
+
+
+// The page has no per-user data, so the browser may keep it and only revalidate (304 = a few bytes instead of ~170 KB).
+let _h = 2166136261;
+for (let i = 0; i < APP_HTML.length; i += 7) _h = Math.imul(_h ^ APP_HTML.charCodeAt(i), 16777619);
+const HTML_ETAG = '"' + (_h >>> 0).toString(36) + "-" + APP_HTML.length.toString(36) + '"';
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      try { return await handleApi(request, env, url); }
+      catch (e) {
+        const m = String((e && e.message) || e);
+        console.log("[api error]", m);
+        return new Response(JSON.stringify({ error: /limit exceeded/i.test(m) ? "kv limit: daily write quota is used up, try again after 00:00 UTC" : m.slice(0, 200) }), { status: 500, headers: { "content-type": "application/json" } });
+      }
+    }
+    if (url.pathname === "/manifest.webmanifest") return staticRes(MANIFEST, "application/manifest+json");
+    if (url.pathname === "/icon.svg") return staticRes(ICON_SVG, "image/svg+xml");
+    if (url.pathname === "/icon-192.png") return staticRes(b64(ICON_192), "image/png");
+    if (url.pathname === "/icon-512.png") return staticRes(b64(ICON_512), "image/png");
+    if (url.pathname === "/sw.js") return new Response(SW_JS, { headers: { "content-type": "text/javascript", "cache-control": "no-cache", "service-worker-allowed": "/" } });
+    if (url.pathname === "/" || url.pathname === "/app") {
+      if (request.headers.get("if-none-match") === HTML_ETAG) return new Response(null, { status: 304, headers: { etag: HTML_ETAG, "cache-control": "no-cache" } });
+      return new Response(APP_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+          etag: HTML_ETAG,
+          "x-robots-tag": "noindex, nofollow",
+          "x-frame-options": "DENY",
+          ...SEC_HEADERS,
+        },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledCheck(env));
+  },
+};+cf(size)+' × '+lv+' = 
+}
+document.addEventListener('input',e=>{if(e.target.closest('#p-c'))calc()});
+(function(){
+ let d=null,ly=0,raf=0;
+ const L=$('#list');
+ let lx=0;const place=y=>{const cs=[...L.querySelectorAll('.card:not(.drag)')];if(!cs.length)return;const R=cs.map(o=>o.getBoundingClientRect()),multi=new Set(R.map(r=>Math.round(r.left))).size>1;let bi=0,bd=1e18;R.forEach((r,i)=>{const dx=lx-(r.left+r.width/2),dy=y-(r.top+r.height/2),dd=dx*dx+dy*dy;if(dd<bd){bd=dd;bi=i}});const r=R[bi],before=multi?(lx>r.left+r.width/2):(y<r.top+r.height/2);before?L.insertBefore(d.ph,cs[bi]):cs[bi].after(d.ph)};
+ const loop=()=>{if(!d)return;if(ly<90)scrollBy(0,-14);else if(ly>innerHeight-90)scrollBy(0,14);place(ly);raf=requestAnimationFrame(loop)};
+ L.addEventListener('pointerdown',e=>{const h=e.target.closest('.dh');if(!h)return;const c=h.closest('.card');if(L.querySelectorAll('.card').length<2)return;e.preventDefault();
+  const r=c.getBoundingClientRect();d={c,off:e.clientY-r.top,ox:e.clientX-r.left,ph:document.createElement('div')};
+  d.ph.className='ph';d.ph.style.height=r.height+'px';c.after(d.ph);
+  c.classList.add('drag');c.style.cssText='position:fixed;z-index:30;width:'+r.width+'px;left:'+r.left+'px;top:'+r.top+'px';
+  try{h.setPointerCapture(e.pointerId)}catch(_){}
+  document.body.style.userSelect='none';ly=e.clientY;lx=e.clientX;raf=requestAnimationFrame(loop)});
+ document.addEventListener('pointermove',e=>{if(!d)return;ly=e.clientY;lx=e.clientX;d.c.style.top=(e.clientY-d.off)+'px';d.c.style.left=(e.clientX-d.ox)+'px';place(ly)});
+ const end=ok=>{if(!d)return;cancelAnimationFrame(raf);const c=d.c;d.ph.replaceWith(c);c.classList.remove('drag');c.style.cssText='';d=null;document.body.style.userSelect='';
+  if(!ok){render();return}
+  if(fltOn()){say('برای جابه‌جایی، اول فیلترها را پاک کن');render();return}
+  const ids=[...L.querySelectorAll('.card')].map(x=>+x.dataset.id),m=new Map(alerts.map(a=>[a.id,a]));alerts=ids.map(i=>m.get(i)).filter(Boolean);
+  api('POST','/api/alerts/reorder',{ids}).catch(()=>{say('جابه‌جایی ذخیره نشد');load()})};
+ document.addEventListener('pointerup',()=>end(true));document.addEventListener('pointercancel',()=>end(false));
+})();
+let st={email:'',verified:false,provider:false};
+function paintSettings(){const c=$('#c-em');c.disabled=!st.verified;if(!st.verified)c.checked=false;$('#c-emh').textContent=st.verified?'':'(اول ایمیل را در ⚙️ تنظیمات تایید کن)';
+ const e=$('#emst');e.className='st '+(st.verified?'ok':'bad');e.textContent=st.verified?'✓ ایمیل تایید شده: '+st.email:(st.provider?'ایمیلی تایید نشده':'⚠️ سرویس ایمیل تنظیم نشده');$('#emrm').hidden=!st.verified}
+async function loadSettings(s0){try{st=s0||await api('GET','/api/settings')}catch(e){}paintSettings()}
+$('#gear').onclick=()=>{setSP('n');if(Date.now()-_setAt>45000){_setAt=Date.now();loadSettings();loadUser();loadTg()}$('#ss').classList.add('on')};
+$('#ssx').onclick=()=>closeSh('#ss');
+$('#tbtn').onclick=()=>{let m='system';try{m=localStorage.getItem('theme')||'system'}catch(e){}const nx=m==='system'?'light':m==='light'?'dark':'system';try{localStorage.setItem('theme',nx)}catch(e){}themeFx();applyTheme()};
+$('#emreq').onclick=async()=>{const em=$('#em').value.trim();if(!em){say('ایمیل را وارد کن');return}$('#emreq').disabled=true;try{await api('POST','/api/email/request',{email:em});$('#emcode').hidden=false;say('کد تایید به ایمیل فرستاده شد (۱۰ دقیقه اعتبار دارد)')}catch(e){say('ارسال نشد ('+e.message+')')}$('#emreq').disabled=false};
+$('#emver').onclick=async()=>{try{await api('POST','/api/email/verify',{code:$('#emc').value.trim()});$('#emcode').hidden=true;$('#emc').value='';await loadSettings();say('ایمیل تایید شد ✓')}catch(e){say('تایید نشد ('+e.message+')')}};
+$('#emrm').onclick=()=>ask('ایمیل حذف بشه؟ آلارم‌هایی که ایمیل دارن فقط از تلگرام اعلان می‌گیرن.',async()=>{await api('POST','/api/email/remove');await loadSettings()});
+$('#tst').onclick=async()=>{const b=$('#tst');b.disabled=true;try{const r=await api('POST','/api/test-notify');const f=(n,x)=>n+': '+(x.skipped?'— (ایمیل تایید نشده)':x.ok?'✓ فرستاده شد':'✗ '+x.error);say(f('تلگرام',r.tg)+'\n'+f('ایمیل',r.email))}catch(e){say('تست انجام نشد ('+e.message+')')}b.disabled=false};
+$('#out').onclick=async()=>{try{await api('POST','/api/logout')}catch(e){}try{localStorage.removeItem('acache')}catch(e){}location.reload()};
+let am='login',codeSent=false,lgOn=false,mailOk=true;
+const EM=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function setMode(m){am=m;codeSent=false;const L=m==='login',R=m==='register',F=m==='reset';
+ $('#lgt').textContent=L?'ورود به پنل':R?'ثبت‌نام — ساخت حساب':'بازیابی رمز';
+ $('#f-u').hidden=F;$('#f-p2').hidden=L;$('#f-c').hidden=true;$('#f-k').hidden=!(R&&!mailOk);
+ $('#lpl').textContent=L?'رمز عبور':'رمز جدید (حداقل ۸ کاراکتر)';
+ $('#pw').autocomplete=L?'current-password':'new-password';
+ $('#lgo').textContent=L?'ورود':'دریافت کد در ایمیل';
+ $('#lsw').textContent=L?'رمز را فراموش کردم':'بازگشت به ورود';$('#lsw').hidden=R;
+ $('#lge').textContent='';$('#lge').style.color=''}
+async function showLogin(){if(lgOn)return;lgOn=true;let r={registered:true,mail:true};try{r=await(await fetch('/api/auth/state',{credentials:'same-origin'})).json()}catch(e){}
+ mailOk=r.mail!==false;setMode(r.registered?'login':'register');$('#lg').classList.add('on');setTimeout(()=>$('#lu').focus(),50)}
+function done(){['#pw','#pw2','#lc','#lkey'].forEach(i=>$(i).value='');lgOn=false;closeSh('#lg');$('#lgo').disabled=false;load();checkLegacy()}
+async function doAuth(){const b=$('#lgo'),u=$('#lu').value.trim(),pw=$('#pw').value,e=$('#lge');e.textContent='';e.style.color='';
+ const bad=m=>{e.textContent=m;b.disabled=false};b.disabled=true;
+ try{
+  if(am==='login'){await api('POST','/api/login',{email:u,password:pw});return done()}
+  if(!codeSent){
+   if(pw.length<8)return bad('رمز باید حداقل ۸ کاراکتر باشد.');
+   if(pw!==$('#pw2').value)return bad('تکرار رمز یکسان نیست.');
+   if(am==='register'&&!EM.test(u))return bad('ایمیل معتبر وارد کن.');
+   if(am==='register'&&!mailOk&&!$('#lkey').value.trim())return bad('کلید API سرویس ایمیل را وارد کن.');
+   await api('POST','/api/auth/code',{purpose:am,email:u,password:pw,lang:LANG,resendKey:$('#lkey').value.trim(),from:$('#lfrom').value.trim()});
+   codeSent=true;$('#f-c').hidden=false;b.textContent='تایید و ادامه';e.textContent='کد ۶ رقمی به ایمیلت فرستاده شد (پوشه‌ی اسپم را هم ببین).';e.style.color='var(--long)';$('#lc').focus();b.disabled=false;return}
+  await api('POST','/api/auth/confirm',{code:$('#lc').value.trim()});done()
+ }catch(x){const m=String(x.message);bad(m.includes('wrong password')?'ایمیل یا رمز اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('not allowed')?'این ایمیل اجازه‌ی ثبت‌نام ندارد.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('429')?'تلاش زیاد؛ کمی بعد دوباره امتحان کن.':'خطا ('+m+')')}}
+$('#lang').textContent=LANG==='en'?'فا':'EN';$('#lgl').textContent=LANG==='en'?'فارسی':'English';$('#lang').onclick=$('#lgl').onclick=()=>setLang(LANG==='en'?'fa':'en');
+$('#lgo').onclick=doAuth;$('#lsw').onclick=()=>setMode(am==='login'?'reset':'login');
+['lu','pw','pw2','lc'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')doAuth()}));
+async function loadUser(){try{const r=await api('GET','/api/auth/state');$('#acu').textContent=r.user;$('#aleg').hidden=!r.legacy;$('#akey').hidden=r.mail!==false}catch(e){}}
+let aemSent=false;
+$('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disabled=true;
+ try{
+  if(!aemSent){
+   if(!EM.test(em)){say('ایمیل معتبر وارد کن.');return}
+   if(!$('#ac').value){say('رمز فعلی را وارد کن.');return}
+   await api('POST','/api/auth/code',{purpose:'email',email:em,current:$('#ac').value,lang:LANG,resendKey:$('#akey').value.trim(),from:''});
+   aemSent=true;$('#acode').hidden=false;b.textContent='تایید ایمیل';say('کد به ایمیل جدید فرستاده شد (اسپم را هم ببین).')
+  }else{
+   await api('POST','/api/auth/confirm',{code:$('#acode').value.trim()});
+   aemSent=false;$('#acode').hidden=true;$('#acode').value='';$('#ae').value='';$('#ac').value='';b.textContent='ارسال کد به ایمیل جدید';say('ایمیل ثبت شد ✓');loadUser()
+  }
+ }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
+ finally{b.disabled=false}};
+function setSP(p){document.querySelectorAll('#sst button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));document.querySelectorAll('#ss .sp').forEach(x=>x.classList.toggle('on',x.dataset.p===p))}
+document.querySelectorAll('#sst button').forEach(b=>b.onclick=()=>setSP(b.dataset.p));
+async function checkLegacy(){try{const r=await api('GET','/api/auth/state');if(r.loggedIn)syncLang();if(r.loggedIn&&r.legacy){setSP('a');$('#ss').classList.add('on');loadUser();loadTg();loadSettings();say('حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.')}}catch(e){}}
+$('#acs').onclick=async()=>{if($('#ap').value.length<8){say('رمز جدید باید حداقل ۸ کاراکتر باشد.');return}try{await api('POST','/api/auth/change',{current:$('#ac').value,password:$('#ap').value});['#ac','#ap'].forEach(i=>$(i).value='');say('رمز تغییر کرد ✓');}catch(e){say(String(e.message).includes('wrong')?'رمز فعلی اشتباه است.':'ذخیره نشد ('+e.message+')')}};
+let tgs={};
+function paintTg(){const e=$('#tgst');e.className='st '+(tgs.connected?'ok':'bad');
+ e.textContent=tgs.connected?'✓ متصل: @'+tgs.bot:(tgs.hasToken?'ربات @'+tgs.bot+' ثبت شد — منتظر اتصال چت':(tgs.viaEnv?'از تنظیمات ورکر استفاده می‌شود (برای تغییر، توکن جدید بده)':'ربات متصل نیست'));
+ $('#tgstep').hidden=!(tgs.hasToken&&!tgs.connected);if(tgs.connected)$('#tgpick').innerHTML='';$('#tglink').href=tgs.link||'#';$('#tgoff').hidden=!tgs.hasToken}
+async function loadTg(){try{tgs=await api('GET','/api/tg')}catch(e){}paintTg()}
+$('#tgset').onclick=async()=>{const v=$('#tgt').value.trim();if(!v){say('توکن ربات را وارد کن');return}try{tgs=await api('POST','/api/tg/token',{token:v});$('#tgt').value='';paintTg();if(tgs.wh)say('یک Webhook قدیمی روی این ربات بود و حذف شد. حالا لینک را بزن و در تلگرام Start را (دوباره) بزن.')}catch(e){say(/invalid|rejected/.test(e.message)?'توکن معتبر نیست.':'ثبت نشد ('+e.message+')')}};
+$('#tgdet').onclick=async()=>{try{const r=await api('POST','/api/tg/detect');tgs=r;paintTg();
+ if(r.pick&&r.pick.length){$('#tgpick').innerHTML='<div class="st" style="margin:6px 0">این چت‌ها به ربات پیام داده‌اند. چت خودت را انتخاب کن:</div>'+r.pick.map(c=>'<button class="lk" style="display:block" data-c="'+esc(c.id)+'">'+esc(c.name)+(c.username?' (@'+esc(c.username)+')':'')+'</button>').join('');return}
+ say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}
+ catch(e){const m=String(e.message);say(m.includes('404')?'هنوز پیامی در ربات ندیدم. در تلگرام به ربات @'+tgs.bot+' یک پیام بفرست (مثلاً /start) و دوباره «تشخیص» را بزن.':/other getUpdates|Conflict/i.test(m)?'یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.':'تشخیص انجام نشد ('+m+')')}};
+$('#tgpick').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{tgs=await api('POST','/api/tg/choose',{chat:b.dataset.c});paintTg();say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}catch(x){say('انجام نشد ('+x.message+')')}};
+$('#tgoff').onclick=()=>ask('ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.',async()=>{tgs=await api('POST','/api/tg/disconnect');paintTg()});
+async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=$('#st');
+ if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
+ const m=Math.round((r.now-r.t)/60000);
+ if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+ else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+ else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
+async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
+ if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
+ const act=alerts.filter(a=>!doneA(a));if(!act.length)return;const cs=[...new Set(act.map(a=>a.coin))];
+ try{prices=await api('GET','/api/prices?coins='+cs.join(','))}catch(e){}
+ act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
+  const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
+  add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
+$('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
+async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
+markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
+try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArray(c.alerts)){alerts=c.alerts.filter(a=>a&&Array.isArray(a.targets)&&a.targets.length);if(Array.isArray(c.cats))cats=c.cats;render();paintChips()}}catch(e){}
+load();setTimeout(checkLegacy,1200);setTimeout(()=>{if(tab==='a'&&!witems.length&&!sitems.length)loadW()},4000);setTimeout(()=>document.body.classList.remove('boot'),450);
+setInterval(()=>{if(!document.hidden&&tab==='a')refresh()},60000);
+setInterval(()=>{if(!document.hidden&&tab==='a')liveTick()},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab==='a'&&Date.now()-_aAt>15000)refresh()});
+(()=>{let t=location.hash.slice(1);if(!(t.length===1&&TABS.includes(t))){try{t=localStorage.getItem('tab')||''}catch(e){t=''}}if(t.length===1&&TABS.includes(t)&&t!=='a')show(t)})();
+</script></body></html>`;
+
+
+// The page has no per-user data, so the browser may keep it and only revalidate (304 = a few bytes instead of ~170 KB).
+let _h = 2166136261;
+for (let i = 0; i < APP_HTML.length; i += 7) _h = Math.imul(_h ^ APP_HTML.charCodeAt(i), 16777619);
+const HTML_ETAG = '"' + (_h >>> 0).toString(36) + "-" + APP_HTML.length.toString(36) + '"';
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      try { return await handleApi(request, env, url); }
+      catch (e) {
+        const m = String((e && e.message) || e);
+        console.log("[api error]", m);
+        return new Response(JSON.stringify({ error: /limit exceeded/i.test(m) ? "kv limit: daily write quota is used up, try again after 00:00 UTC" : m.slice(0, 200) }), { status: 500, headers: { "content-type": "application/json" } });
+      }
+    }
+    if (url.pathname === "/manifest.webmanifest") return staticRes(MANIFEST, "application/manifest+json");
+    if (url.pathname === "/icon.svg") return staticRes(ICON_SVG, "image/svg+xml");
+    if (url.pathname === "/icon-192.png") return staticRes(b64(ICON_192), "image/png");
+    if (url.pathname === "/icon-512.png") return staticRes(b64(ICON_512), "image/png");
+    if (url.pathname === "/sw.js") return new Response(SW_JS, { headers: { "content-type": "text/javascript", "cache-control": "no-cache", "service-worker-allowed": "/" } });
+    if (url.pathname === "/" || url.pathname === "/app") {
+      if (request.headers.get("if-none-match") === HTML_ETAG) return new Response(null, { status: 304, headers: { etag: HTML_ETAG, "cache-control": "no-cache" } });
+      return new Response(APP_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+          etag: HTML_ETAG,
+          "x-robots-tag": "noindex, nofollow",
+          "x-frame-options": "DENY",
+          ...SEC_HEADERS,
+        },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledCheck(env));
+  },
+};+cf(not)+'<br>Qty = 
+}
+document.addEventListener('input',e=>{if(e.target.closest('#p-c'))calc()});
+(function(){
+ let d=null,ly=0,raf=0;
+ const L=$('#list');
+ let lx=0;const place=y=>{const cs=[...L.querySelectorAll('.card:not(.drag)')];if(!cs.length)return;const R=cs.map(o=>o.getBoundingClientRect()),multi=new Set(R.map(r=>Math.round(r.left))).size>1;let bi=0,bd=1e18;R.forEach((r,i)=>{const dx=lx-(r.left+r.width/2),dy=y-(r.top+r.height/2),dd=dx*dx+dy*dy;if(dd<bd){bd=dd;bi=i}});const r=R[bi],before=multi?(lx>r.left+r.width/2):(y<r.top+r.height/2);before?L.insertBefore(d.ph,cs[bi]):cs[bi].after(d.ph)};
+ const loop=()=>{if(!d)return;if(ly<90)scrollBy(0,-14);else if(ly>innerHeight-90)scrollBy(0,14);place(ly);raf=requestAnimationFrame(loop)};
+ L.addEventListener('pointerdown',e=>{const h=e.target.closest('.dh');if(!h)return;const c=h.closest('.card');if(L.querySelectorAll('.card').length<2)return;e.preventDefault();
+  const r=c.getBoundingClientRect();d={c,off:e.clientY-r.top,ox:e.clientX-r.left,ph:document.createElement('div')};
+  d.ph.className='ph';d.ph.style.height=r.height+'px';c.after(d.ph);
+  c.classList.add('drag');c.style.cssText='position:fixed;z-index:30;width:'+r.width+'px;left:'+r.left+'px;top:'+r.top+'px';
+  try{h.setPointerCapture(e.pointerId)}catch(_){}
+  document.body.style.userSelect='none';ly=e.clientY;lx=e.clientX;raf=requestAnimationFrame(loop)});
+ document.addEventListener('pointermove',e=>{if(!d)return;ly=e.clientY;lx=e.clientX;d.c.style.top=(e.clientY-d.off)+'px';d.c.style.left=(e.clientX-d.ox)+'px';place(ly)});
+ const end=ok=>{if(!d)return;cancelAnimationFrame(raf);const c=d.c;d.ph.replaceWith(c);c.classList.remove('drag');c.style.cssText='';d=null;document.body.style.userSelect='';
+  if(!ok){render();return}
+  if(fltOn()){say('برای جابه‌جایی، اول فیلترها را پاک کن');render();return}
+  const ids=[...L.querySelectorAll('.card')].map(x=>+x.dataset.id),m=new Map(alerts.map(a=>[a.id,a]));alerts=ids.map(i=>m.get(i)).filter(Boolean);
+  api('POST','/api/alerts/reorder',{ids}).catch(()=>{say('جابه‌جایی ذخیره نشد');load()})};
+ document.addEventListener('pointerup',()=>end(true));document.addEventListener('pointercancel',()=>end(false));
+})();
+let st={email:'',verified:false,provider:false};
+function paintSettings(){const c=$('#c-em');c.disabled=!st.verified;if(!st.verified)c.checked=false;$('#c-emh').textContent=st.verified?'':'(اول ایمیل را در ⚙️ تنظیمات تایید کن)';
+ const e=$('#emst');e.className='st '+(st.verified?'ok':'bad');e.textContent=st.verified?'✓ ایمیل تایید شده: '+st.email:(st.provider?'ایمیلی تایید نشده':'⚠️ سرویس ایمیل تنظیم نشده');$('#emrm').hidden=!st.verified}
+async function loadSettings(s0){try{st=s0||await api('GET','/api/settings')}catch(e){}paintSettings()}
+$('#gear').onclick=()=>{setSP('n');if(Date.now()-_setAt>45000){_setAt=Date.now();loadSettings();loadUser();loadTg()}$('#ss').classList.add('on')};
+$('#ssx').onclick=()=>closeSh('#ss');
+$('#tbtn').onclick=()=>{let m='system';try{m=localStorage.getItem('theme')||'system'}catch(e){}const nx=m==='system'?'light':m==='light'?'dark':'system';try{localStorage.setItem('theme',nx)}catch(e){}themeFx();applyTheme()};
+$('#emreq').onclick=async()=>{const em=$('#em').value.trim();if(!em){say('ایمیل را وارد کن');return}$('#emreq').disabled=true;try{await api('POST','/api/email/request',{email:em});$('#emcode').hidden=false;say('کد تایید به ایمیل فرستاده شد (۱۰ دقیقه اعتبار دارد)')}catch(e){say('ارسال نشد ('+e.message+')')}$('#emreq').disabled=false};
+$('#emver').onclick=async()=>{try{await api('POST','/api/email/verify',{code:$('#emc').value.trim()});$('#emcode').hidden=true;$('#emc').value='';await loadSettings();say('ایمیل تایید شد ✓')}catch(e){say('تایید نشد ('+e.message+')')}};
+$('#emrm').onclick=()=>ask('ایمیل حذف بشه؟ آلارم‌هایی که ایمیل دارن فقط از تلگرام اعلان می‌گیرن.',async()=>{await api('POST','/api/email/remove');await loadSettings()});
+$('#tst').onclick=async()=>{const b=$('#tst');b.disabled=true;try{const r=await api('POST','/api/test-notify');const f=(n,x)=>n+': '+(x.skipped?'— (ایمیل تایید نشده)':x.ok?'✓ فرستاده شد':'✗ '+x.error);say(f('تلگرام',r.tg)+'\n'+f('ایمیل',r.email))}catch(e){say('تست انجام نشد ('+e.message+')')}b.disabled=false};
+$('#out').onclick=async()=>{try{await api('POST','/api/logout')}catch(e){}try{localStorage.removeItem('acache')}catch(e){}location.reload()};
+let am='login',codeSent=false,lgOn=false,mailOk=true;
+const EM=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function setMode(m){am=m;codeSent=false;const L=m==='login',R=m==='register',F=m==='reset';
+ $('#lgt').textContent=L?'ورود به پنل':R?'ثبت‌نام — ساخت حساب':'بازیابی رمز';
+ $('#f-u').hidden=F;$('#f-p2').hidden=L;$('#f-c').hidden=true;$('#f-k').hidden=!(R&&!mailOk);
+ $('#lpl').textContent=L?'رمز عبور':'رمز جدید (حداقل ۸ کاراکتر)';
+ $('#pw').autocomplete=L?'current-password':'new-password';
+ $('#lgo').textContent=L?'ورود':'دریافت کد در ایمیل';
+ $('#lsw').textContent=L?'رمز را فراموش کردم':'بازگشت به ورود';$('#lsw').hidden=R;
+ $('#lge').textContent='';$('#lge').style.color=''}
+async function showLogin(){if(lgOn)return;lgOn=true;let r={registered:true,mail:true};try{r=await(await fetch('/api/auth/state',{credentials:'same-origin'})).json()}catch(e){}
+ mailOk=r.mail!==false;setMode(r.registered?'login':'register');$('#lg').classList.add('on');setTimeout(()=>$('#lu').focus(),50)}
+function done(){['#pw','#pw2','#lc','#lkey'].forEach(i=>$(i).value='');lgOn=false;closeSh('#lg');$('#lgo').disabled=false;load();checkLegacy()}
+async function doAuth(){const b=$('#lgo'),u=$('#lu').value.trim(),pw=$('#pw').value,e=$('#lge');e.textContent='';e.style.color='';
+ const bad=m=>{e.textContent=m;b.disabled=false};b.disabled=true;
+ try{
+  if(am==='login'){await api('POST','/api/login',{email:u,password:pw});return done()}
+  if(!codeSent){
+   if(pw.length<8)return bad('رمز باید حداقل ۸ کاراکتر باشد.');
+   if(pw!==$('#pw2').value)return bad('تکرار رمز یکسان نیست.');
+   if(am==='register'&&!EM.test(u))return bad('ایمیل معتبر وارد کن.');
+   if(am==='register'&&!mailOk&&!$('#lkey').value.trim())return bad('کلید API سرویس ایمیل را وارد کن.');
+   await api('POST','/api/auth/code',{purpose:am,email:u,password:pw,lang:LANG,resendKey:$('#lkey').value.trim(),from:$('#lfrom').value.trim()});
+   codeSent=true;$('#f-c').hidden=false;b.textContent='تایید و ادامه';e.textContent='کد ۶ رقمی به ایمیلت فرستاده شد (پوشه‌ی اسپم را هم ببین).';e.style.color='var(--long)';$('#lc').focus();b.disabled=false;return}
+  await api('POST','/api/auth/confirm',{code:$('#lc').value.trim()});done()
+ }catch(x){const m=String(x.message);bad(m.includes('wrong password')?'ایمیل یا رمز اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('not allowed')?'این ایمیل اجازه‌ی ثبت‌نام ندارد.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('429')?'تلاش زیاد؛ کمی بعد دوباره امتحان کن.':'خطا ('+m+')')}}
+$('#lang').textContent=LANG==='en'?'فا':'EN';$('#lgl').textContent=LANG==='en'?'فارسی':'English';$('#lang').onclick=$('#lgl').onclick=()=>setLang(LANG==='en'?'fa':'en');
+$('#lgo').onclick=doAuth;$('#lsw').onclick=()=>setMode(am==='login'?'reset':'login');
+['lu','pw','pw2','lc'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')doAuth()}));
+async function loadUser(){try{const r=await api('GET','/api/auth/state');$('#acu').textContent=r.user;$('#aleg').hidden=!r.legacy;$('#akey').hidden=r.mail!==false}catch(e){}}
+let aemSent=false;
+$('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disabled=true;
+ try{
+  if(!aemSent){
+   if(!EM.test(em)){say('ایمیل معتبر وارد کن.');return}
+   if(!$('#ac').value){say('رمز فعلی را وارد کن.');return}
+   await api('POST','/api/auth/code',{purpose:'email',email:em,current:$('#ac').value,lang:LANG,resendKey:$('#akey').value.trim(),from:''});
+   aemSent=true;$('#acode').hidden=false;b.textContent='تایید ایمیل';say('کد به ایمیل جدید فرستاده شد (اسپم را هم ببین).')
+  }else{
+   await api('POST','/api/auth/confirm',{code:$('#acode').value.trim()});
+   aemSent=false;$('#acode').hidden=true;$('#acode').value='';$('#ae').value='';$('#ac').value='';b.textContent='ارسال کد به ایمیل جدید';say('ایمیل ثبت شد ✓');loadUser()
+  }
+ }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
+ finally{b.disabled=false}};
+function setSP(p){document.querySelectorAll('#sst button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));document.querySelectorAll('#ss .sp').forEach(x=>x.classList.toggle('on',x.dataset.p===p))}
+document.querySelectorAll('#sst button').forEach(b=>b.onclick=()=>setSP(b.dataset.p));
+async function checkLegacy(){try{const r=await api('GET','/api/auth/state');if(r.loggedIn)syncLang();if(r.loggedIn&&r.legacy){setSP('a');$('#ss').classList.add('on');loadUser();loadTg();loadSettings();say('حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.')}}catch(e){}}
+$('#acs').onclick=async()=>{if($('#ap').value.length<8){say('رمز جدید باید حداقل ۸ کاراکتر باشد.');return}try{await api('POST','/api/auth/change',{current:$('#ac').value,password:$('#ap').value});['#ac','#ap'].forEach(i=>$(i).value='');say('رمز تغییر کرد ✓');}catch(e){say(String(e.message).includes('wrong')?'رمز فعلی اشتباه است.':'ذخیره نشد ('+e.message+')')}};
+let tgs={};
+function paintTg(){const e=$('#tgst');e.className='st '+(tgs.connected?'ok':'bad');
+ e.textContent=tgs.connected?'✓ متصل: @'+tgs.bot:(tgs.hasToken?'ربات @'+tgs.bot+' ثبت شد — منتظر اتصال چت':(tgs.viaEnv?'از تنظیمات ورکر استفاده می‌شود (برای تغییر، توکن جدید بده)':'ربات متصل نیست'));
+ $('#tgstep').hidden=!(tgs.hasToken&&!tgs.connected);if(tgs.connected)$('#tgpick').innerHTML='';$('#tglink').href=tgs.link||'#';$('#tgoff').hidden=!tgs.hasToken}
+async function loadTg(){try{tgs=await api('GET','/api/tg')}catch(e){}paintTg()}
+$('#tgset').onclick=async()=>{const v=$('#tgt').value.trim();if(!v){say('توکن ربات را وارد کن');return}try{tgs=await api('POST','/api/tg/token',{token:v});$('#tgt').value='';paintTg();if(tgs.wh)say('یک Webhook قدیمی روی این ربات بود و حذف شد. حالا لینک را بزن و در تلگرام Start را (دوباره) بزن.')}catch(e){say(/invalid|rejected/.test(e.message)?'توکن معتبر نیست.':'ثبت نشد ('+e.message+')')}};
+$('#tgdet').onclick=async()=>{try{const r=await api('POST','/api/tg/detect');tgs=r;paintTg();
+ if(r.pick&&r.pick.length){$('#tgpick').innerHTML='<div class="st" style="margin:6px 0">این چت‌ها به ربات پیام داده‌اند. چت خودت را انتخاب کن:</div>'+r.pick.map(c=>'<button class="lk" style="display:block" data-c="'+esc(c.id)+'">'+esc(c.name)+(c.username?' (@'+esc(c.username)+')':'')+'</button>').join('');return}
+ say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}
+ catch(e){const m=String(e.message);say(m.includes('404')?'هنوز پیامی در ربات ندیدم. در تلگرام به ربات @'+tgs.bot+' یک پیام بفرست (مثلاً /start) و دوباره «تشخیص» را بزن.':/other getUpdates|Conflict/i.test(m)?'یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.':'تشخیص انجام نشد ('+m+')')}};
+$('#tgpick').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{tgs=await api('POST','/api/tg/choose',{chat:b.dataset.c});paintTg();say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}catch(x){say('انجام نشد ('+x.message+')')}};
+$('#tgoff').onclick=()=>ask('ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.',async()=>{tgs=await api('POST','/api/tg/disconnect');paintTg()});
+async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=$('#st');
+ if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
+ const m=Math.round((r.now-r.t)/60000);
+ if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+ else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+ else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
+async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
+ if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
+ const act=alerts.filter(a=>!doneA(a));if(!act.length)return;const cs=[...new Set(act.map(a=>a.coin))];
+ try{prices=await api('GET','/api/prices?coins='+cs.join(','))}catch(e){}
+ act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
+  const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
+  add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
+$('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
+async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
+markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
+try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArray(c.alerts)){alerts=c.alerts.filter(a=>a&&Array.isArray(a.targets)&&a.targets.length);if(Array.isArray(c.cats))cats=c.cats;render();paintChips()}}catch(e){}
+load();setTimeout(checkLegacy,1200);setTimeout(()=>{if(tab==='a'&&!witems.length&&!sitems.length)loadW()},4000);setTimeout(()=>document.body.classList.remove('boot'),450);
+setInterval(()=>{if(!document.hidden&&tab==='a')refresh()},60000);
+setInterval(()=>{if(!document.hidden&&tab==='a')liveTick()},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab==='a'&&Date.now()-_aAt>15000)refresh()});
+(()=>{let t=location.hash.slice(1);if(!(t.length===1&&TABS.includes(t))){try{t=localStorage.getItem('tab')||''}catch(e){t=''}}if(t.length===1&&TABS.includes(t)&&t!=='a')show(t)})();
+</script></body></html>`;
+
+
+// The page has no per-user data, so the browser may keep it and only revalidate (304 = a few bytes instead of ~170 KB).
+let _h = 2166136261;
+for (let i = 0; i < APP_HTML.length; i += 7) _h = Math.imul(_h ^ APP_HTML.charCodeAt(i), 16777619);
+const HTML_ETAG = '"' + (_h >>> 0).toString(36) + "-" + APP_HTML.length.toString(36) + '"';
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      try { return await handleApi(request, env, url); }
+      catch (e) {
+        const m = String((e && e.message) || e);
+        console.log("[api error]", m);
+        return new Response(JSON.stringify({ error: /limit exceeded/i.test(m) ? "kv limit: daily write quota is used up, try again after 00:00 UTC" : m.slice(0, 200) }), { status: 500, headers: { "content-type": "application/json" } });
+      }
+    }
+    if (url.pathname === "/manifest.webmanifest") return staticRes(MANIFEST, "application/manifest+json");
+    if (url.pathname === "/icon.svg") return staticRes(ICON_SVG, "image/svg+xml");
+    if (url.pathname === "/icon-192.png") return staticRes(b64(ICON_192), "image/png");
+    if (url.pathname === "/icon-512.png") return staticRes(b64(ICON_512), "image/png");
+    if (url.pathname === "/sw.js") return new Response(SW_JS, { headers: { "content-type": "text/javascript", "cache-control": "no-cache", "service-worker-allowed": "/" } });
+    if (url.pathname === "/" || url.pathname === "/app") {
+      if (request.headers.get("if-none-match") === HTML_ETAG) return new Response(null, { status: 304, headers: { etag: HTML_ETAG, "cache-control": "no-cache" } });
+      return new Response(APP_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+          etag: HTML_ETAG,
+          "x-robots-tag": "noindex, nofollow",
+          "x-frame-options": "DENY",
+          ...SEC_HEADERS,
+        },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledCheck(env));
+  },
+};+cf(not)+' ÷ '+pf(en)+' = '+pf(qty)+(reward!==null?'<br>Reward = 
+}
+document.addEventListener('input',e=>{if(e.target.closest('#p-c'))calc()});
+(function(){
+ let d=null,ly=0,raf=0;
+ const L=$('#list');
+ let lx=0;const place=y=>{const cs=[...L.querySelectorAll('.card:not(.drag)')];if(!cs.length)return;const R=cs.map(o=>o.getBoundingClientRect()),multi=new Set(R.map(r=>Math.round(r.left))).size>1;let bi=0,bd=1e18;R.forEach((r,i)=>{const dx=lx-(r.left+r.width/2),dy=y-(r.top+r.height/2),dd=dx*dx+dy*dy;if(dd<bd){bd=dd;bi=i}});const r=R[bi],before=multi?(lx>r.left+r.width/2):(y<r.top+r.height/2);before?L.insertBefore(d.ph,cs[bi]):cs[bi].after(d.ph)};
+ const loop=()=>{if(!d)return;if(ly<90)scrollBy(0,-14);else if(ly>innerHeight-90)scrollBy(0,14);place(ly);raf=requestAnimationFrame(loop)};
+ L.addEventListener('pointerdown',e=>{const h=e.target.closest('.dh');if(!h)return;const c=h.closest('.card');if(L.querySelectorAll('.card').length<2)return;e.preventDefault();
+  const r=c.getBoundingClientRect();d={c,off:e.clientY-r.top,ox:e.clientX-r.left,ph:document.createElement('div')};
+  d.ph.className='ph';d.ph.style.height=r.height+'px';c.after(d.ph);
+  c.classList.add('drag');c.style.cssText='position:fixed;z-index:30;width:'+r.width+'px;left:'+r.left+'px;top:'+r.top+'px';
+  try{h.setPointerCapture(e.pointerId)}catch(_){}
+  document.body.style.userSelect='none';ly=e.clientY;lx=e.clientX;raf=requestAnimationFrame(loop)});
+ document.addEventListener('pointermove',e=>{if(!d)return;ly=e.clientY;lx=e.clientX;d.c.style.top=(e.clientY-d.off)+'px';d.c.style.left=(e.clientX-d.ox)+'px';place(ly)});
+ const end=ok=>{if(!d)return;cancelAnimationFrame(raf);const c=d.c;d.ph.replaceWith(c);c.classList.remove('drag');c.style.cssText='';d=null;document.body.style.userSelect='';
+  if(!ok){render();return}
+  if(fltOn()){say('برای جابه‌جایی، اول فیلترها را پاک کن');render();return}
+  const ids=[...L.querySelectorAll('.card')].map(x=>+x.dataset.id),m=new Map(alerts.map(a=>[a.id,a]));alerts=ids.map(i=>m.get(i)).filter(Boolean);
+  api('POST','/api/alerts/reorder',{ids}).catch(()=>{say('جابه‌جایی ذخیره نشد');load()})};
+ document.addEventListener('pointerup',()=>end(true));document.addEventListener('pointercancel',()=>end(false));
+})();
+let st={email:'',verified:false,provider:false};
+function paintSettings(){const c=$('#c-em');c.disabled=!st.verified;if(!st.verified)c.checked=false;$('#c-emh').textContent=st.verified?'':'(اول ایمیل را در ⚙️ تنظیمات تایید کن)';
+ const e=$('#emst');e.className='st '+(st.verified?'ok':'bad');e.textContent=st.verified?'✓ ایمیل تایید شده: '+st.email:(st.provider?'ایمیلی تایید نشده':'⚠️ سرویس ایمیل تنظیم نشده');$('#emrm').hidden=!st.verified}
+async function loadSettings(s0){try{st=s0||await api('GET','/api/settings')}catch(e){}paintSettings()}
+$('#gear').onclick=()=>{setSP('n');if(Date.now()-_setAt>45000){_setAt=Date.now();loadSettings();loadUser();loadTg()}$('#ss').classList.add('on')};
+$('#ssx').onclick=()=>closeSh('#ss');
+$('#tbtn').onclick=()=>{let m='system';try{m=localStorage.getItem('theme')||'system'}catch(e){}const nx=m==='system'?'light':m==='light'?'dark':'system';try{localStorage.setItem('theme',nx)}catch(e){}themeFx();applyTheme()};
+$('#emreq').onclick=async()=>{const em=$('#em').value.trim();if(!em){say('ایمیل را وارد کن');return}$('#emreq').disabled=true;try{await api('POST','/api/email/request',{email:em});$('#emcode').hidden=false;say('کد تایید به ایمیل فرستاده شد (۱۰ دقیقه اعتبار دارد)')}catch(e){say('ارسال نشد ('+e.message+')')}$('#emreq').disabled=false};
+$('#emver').onclick=async()=>{try{await api('POST','/api/email/verify',{code:$('#emc').value.trim()});$('#emcode').hidden=true;$('#emc').value='';await loadSettings();say('ایمیل تایید شد ✓')}catch(e){say('تایید نشد ('+e.message+')')}};
+$('#emrm').onclick=()=>ask('ایمیل حذف بشه؟ آلارم‌هایی که ایمیل دارن فقط از تلگرام اعلان می‌گیرن.',async()=>{await api('POST','/api/email/remove');await loadSettings()});
+$('#tst').onclick=async()=>{const b=$('#tst');b.disabled=true;try{const r=await api('POST','/api/test-notify');const f=(n,x)=>n+': '+(x.skipped?'— (ایمیل تایید نشده)':x.ok?'✓ فرستاده شد':'✗ '+x.error);say(f('تلگرام',r.tg)+'\n'+f('ایمیل',r.email))}catch(e){say('تست انجام نشد ('+e.message+')')}b.disabled=false};
+$('#out').onclick=async()=>{try{await api('POST','/api/logout')}catch(e){}try{localStorage.removeItem('acache')}catch(e){}location.reload()};
+let am='login',codeSent=false,lgOn=false,mailOk=true;
+const EM=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function setMode(m){am=m;codeSent=false;const L=m==='login',R=m==='register',F=m==='reset';
+ $('#lgt').textContent=L?'ورود به پنل':R?'ثبت‌نام — ساخت حساب':'بازیابی رمز';
+ $('#f-u').hidden=F;$('#f-p2').hidden=L;$('#f-c').hidden=true;$('#f-k').hidden=!(R&&!mailOk);
+ $('#lpl').textContent=L?'رمز عبور':'رمز جدید (حداقل ۸ کاراکتر)';
+ $('#pw').autocomplete=L?'current-password':'new-password';
+ $('#lgo').textContent=L?'ورود':'دریافت کد در ایمیل';
+ $('#lsw').textContent=L?'رمز را فراموش کردم':'بازگشت به ورود';$('#lsw').hidden=R;
+ $('#lge').textContent='';$('#lge').style.color=''}
+async function showLogin(){if(lgOn)return;lgOn=true;let r={registered:true,mail:true};try{r=await(await fetch('/api/auth/state',{credentials:'same-origin'})).json()}catch(e){}
+ mailOk=r.mail!==false;setMode(r.registered?'login':'register');$('#lg').classList.add('on');setTimeout(()=>$('#lu').focus(),50)}
+function done(){['#pw','#pw2','#lc','#lkey'].forEach(i=>$(i).value='');lgOn=false;closeSh('#lg');$('#lgo').disabled=false;load();checkLegacy()}
+async function doAuth(){const b=$('#lgo'),u=$('#lu').value.trim(),pw=$('#pw').value,e=$('#lge');e.textContent='';e.style.color='';
+ const bad=m=>{e.textContent=m;b.disabled=false};b.disabled=true;
+ try{
+  if(am==='login'){await api('POST','/api/login',{email:u,password:pw});return done()}
+  if(!codeSent){
+   if(pw.length<8)return bad('رمز باید حداقل ۸ کاراکتر باشد.');
+   if(pw!==$('#pw2').value)return bad('تکرار رمز یکسان نیست.');
+   if(am==='register'&&!EM.test(u))return bad('ایمیل معتبر وارد کن.');
+   if(am==='register'&&!mailOk&&!$('#lkey').value.trim())return bad('کلید API سرویس ایمیل را وارد کن.');
+   await api('POST','/api/auth/code',{purpose:am,email:u,password:pw,lang:LANG,resendKey:$('#lkey').value.trim(),from:$('#lfrom').value.trim()});
+   codeSent=true;$('#f-c').hidden=false;b.textContent='تایید و ادامه';e.textContent='کد ۶ رقمی به ایمیلت فرستاده شد (پوشه‌ی اسپم را هم ببین).';e.style.color='var(--long)';$('#lc').focus();b.disabled=false;return}
+  await api('POST','/api/auth/confirm',{code:$('#lc').value.trim()});done()
+ }catch(x){const m=String(x.message);bad(m.includes('wrong password')?'ایمیل یا رمز اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('not allowed')?'این ایمیل اجازه‌ی ثبت‌نام ندارد.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('429')?'تلاش زیاد؛ کمی بعد دوباره امتحان کن.':'خطا ('+m+')')}}
+$('#lang').textContent=LANG==='en'?'فا':'EN';$('#lgl').textContent=LANG==='en'?'فارسی':'English';$('#lang').onclick=$('#lgl').onclick=()=>setLang(LANG==='en'?'fa':'en');
+$('#lgo').onclick=doAuth;$('#lsw').onclick=()=>setMode(am==='login'?'reset':'login');
+['lu','pw','pw2','lc'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')doAuth()}));
+async function loadUser(){try{const r=await api('GET','/api/auth/state');$('#acu').textContent=r.user;$('#aleg').hidden=!r.legacy;$('#akey').hidden=r.mail!==false}catch(e){}}
+let aemSent=false;
+$('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disabled=true;
+ try{
+  if(!aemSent){
+   if(!EM.test(em)){say('ایمیل معتبر وارد کن.');return}
+   if(!$('#ac').value){say('رمز فعلی را وارد کن.');return}
+   await api('POST','/api/auth/code',{purpose:'email',email:em,current:$('#ac').value,lang:LANG,resendKey:$('#akey').value.trim(),from:''});
+   aemSent=true;$('#acode').hidden=false;b.textContent='تایید ایمیل';say('کد به ایمیل جدید فرستاده شد (اسپم را هم ببین).')
+  }else{
+   await api('POST','/api/auth/confirm',{code:$('#acode').value.trim()});
+   aemSent=false;$('#acode').hidden=true;$('#acode').value='';$('#ae').value='';$('#ac').value='';b.textContent='ارسال کد به ایمیل جدید';say('ایمیل ثبت شد ✓');loadUser()
+  }
+ }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
+ finally{b.disabled=false}};
+function setSP(p){document.querySelectorAll('#sst button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));document.querySelectorAll('#ss .sp').forEach(x=>x.classList.toggle('on',x.dataset.p===p))}
+document.querySelectorAll('#sst button').forEach(b=>b.onclick=()=>setSP(b.dataset.p));
+async function checkLegacy(){try{const r=await api('GET','/api/auth/state');if(r.loggedIn)syncLang();if(r.loggedIn&&r.legacy){setSP('a');$('#ss').classList.add('on');loadUser();loadTg();loadSettings();say('حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.')}}catch(e){}}
+$('#acs').onclick=async()=>{if($('#ap').value.length<8){say('رمز جدید باید حداقل ۸ کاراکتر باشد.');return}try{await api('POST','/api/auth/change',{current:$('#ac').value,password:$('#ap').value});['#ac','#ap'].forEach(i=>$(i).value='');say('رمز تغییر کرد ✓');}catch(e){say(String(e.message).includes('wrong')?'رمز فعلی اشتباه است.':'ذخیره نشد ('+e.message+')')}};
+let tgs={};
+function paintTg(){const e=$('#tgst');e.className='st '+(tgs.connected?'ok':'bad');
+ e.textContent=tgs.connected?'✓ متصل: @'+tgs.bot:(tgs.hasToken?'ربات @'+tgs.bot+' ثبت شد — منتظر اتصال چت':(tgs.viaEnv?'از تنظیمات ورکر استفاده می‌شود (برای تغییر، توکن جدید بده)':'ربات متصل نیست'));
+ $('#tgstep').hidden=!(tgs.hasToken&&!tgs.connected);if(tgs.connected)$('#tgpick').innerHTML='';$('#tglink').href=tgs.link||'#';$('#tgoff').hidden=!tgs.hasToken}
+async function loadTg(){try{tgs=await api('GET','/api/tg')}catch(e){}paintTg()}
+$('#tgset').onclick=async()=>{const v=$('#tgt').value.trim();if(!v){say('توکن ربات را وارد کن');return}try{tgs=await api('POST','/api/tg/token',{token:v});$('#tgt').value='';paintTg();if(tgs.wh)say('یک Webhook قدیمی روی این ربات بود و حذف شد. حالا لینک را بزن و در تلگرام Start را (دوباره) بزن.')}catch(e){say(/invalid|rejected/.test(e.message)?'توکن معتبر نیست.':'ثبت نشد ('+e.message+')')}};
+$('#tgdet').onclick=async()=>{try{const r=await api('POST','/api/tg/detect');tgs=r;paintTg();
+ if(r.pick&&r.pick.length){$('#tgpick').innerHTML='<div class="st" style="margin:6px 0">این چت‌ها به ربات پیام داده‌اند. چت خودت را انتخاب کن:</div>'+r.pick.map(c=>'<button class="lk" style="display:block" data-c="'+esc(c.id)+'">'+esc(c.name)+(c.username?' (@'+esc(c.username)+')':'')+'</button>').join('');return}
+ say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}
+ catch(e){const m=String(e.message);say(m.includes('404')?'هنوز پیامی در ربات ندیدم. در تلگرام به ربات @'+tgs.bot+' یک پیام بفرست (مثلاً /start) و دوباره «تشخیص» را بزن.':/other getUpdates|Conflict/i.test(m)?'یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.':'تشخیص انجام نشد ('+m+')')}};
+$('#tgpick').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{tgs=await api('POST','/api/tg/choose',{chat:b.dataset.c});paintTg();say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}catch(x){say('انجام نشد ('+x.message+')')}};
+$('#tgoff').onclick=()=>ask('ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.',async()=>{tgs=await api('POST','/api/tg/disconnect');paintTg()});
+async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=$('#st');
+ if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
+ const m=Math.round((r.now-r.t)/60000);
+ if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+ else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+ else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
+async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
+ if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
+ const act=alerts.filter(a=>!doneA(a));if(!act.length)return;const cs=[...new Set(act.map(a=>a.coin))];
+ try{prices=await api('GET','/api/prices?coins='+cs.join(','))}catch(e){}
+ act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
+  const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
+  add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
+$('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
+async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
+markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
+try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArray(c.alerts)){alerts=c.alerts.filter(a=>a&&Array.isArray(a.targets)&&a.targets.length);if(Array.isArray(c.cats))cats=c.cats;render();paintChips()}}catch(e){}
+load();setTimeout(checkLegacy,1200);setTimeout(()=>{if(tab==='a'&&!witems.length&&!sitems.length)loadW()},4000);setTimeout(()=>document.body.classList.remove('boot'),450);
+setInterval(()=>{if(!document.hidden&&tab==='a')refresh()},60000);
+setInterval(()=>{if(!document.hidden&&tab==='a')liveTick()},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab==='a'&&Date.now()-_aAt>15000)refresh()});
+(()=>{let t=location.hash.slice(1);if(!(t.length===1&&TABS.includes(t))){try{t=localStorage.getItem('tab')||''}catch(e){t=''}}if(t.length===1&&TABS.includes(t)&&t!=='a')show(t)})();
+</script></body></html>`;
+
+
+// The page has no per-user data, so the browser may keep it and only revalidate (304 = a few bytes instead of ~170 KB).
+let _h = 2166136261;
+for (let i = 0; i < APP_HTML.length; i += 7) _h = Math.imul(_h ^ APP_HTML.charCodeAt(i), 16777619);
+const HTML_ETAG = '"' + (_h >>> 0).toString(36) + "-" + APP_HTML.length.toString(36) + '"';
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      try { return await handleApi(request, env, url); }
+      catch (e) {
+        const m = String((e && e.message) || e);
+        console.log("[api error]", m);
+        return new Response(JSON.stringify({ error: /limit exceeded/i.test(m) ? "kv limit: daily write quota is used up, try again after 00:00 UTC" : m.slice(0, 200) }), { status: 500, headers: { "content-type": "application/json" } });
+      }
+    }
+    if (url.pathname === "/manifest.webmanifest") return staticRes(MANIFEST, "application/manifest+json");
+    if (url.pathname === "/icon.svg") return staticRes(ICON_SVG, "image/svg+xml");
+    if (url.pathname === "/icon-192.png") return staticRes(b64(ICON_192), "image/png");
+    if (url.pathname === "/icon-512.png") return staticRes(b64(ICON_512), "image/png");
+    if (url.pathname === "/sw.js") return new Response(SW_JS, { headers: { "content-type": "text/javascript", "cache-control": "no-cache", "service-worker-allowed": "/" } });
+    if (url.pathname === "/" || url.pathname === "/app") {
+      if (request.headers.get("if-none-match") === HTML_ETAG) return new Response(null, { status: 304, headers: { etag: HTML_ETAG, "cache-control": "no-cache" } });
+      return new Response(APP_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+          etag: HTML_ETAG,
+          "x-robots-tag": "noindex, nofollow",
+          "x-frame-options": "DENY",
+          ...SEC_HEADERS,
+        },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledCheck(env));
+  },
+};+cf(not)+' × '+cf(tpd,4)+'%'+(fees?' − fees 
+}
+document.addEventListener('input',e=>{if(e.target.closest('#p-c'))calc()});
+(function(){
+ let d=null,ly=0,raf=0;
+ const L=$('#list');
+ let lx=0;const place=y=>{const cs=[...L.querySelectorAll('.card:not(.drag)')];if(!cs.length)return;const R=cs.map(o=>o.getBoundingClientRect()),multi=new Set(R.map(r=>Math.round(r.left))).size>1;let bi=0,bd=1e18;R.forEach((r,i)=>{const dx=lx-(r.left+r.width/2),dy=y-(r.top+r.height/2),dd=dx*dx+dy*dy;if(dd<bd){bd=dd;bi=i}});const r=R[bi],before=multi?(lx>r.left+r.width/2):(y<r.top+r.height/2);before?L.insertBefore(d.ph,cs[bi]):cs[bi].after(d.ph)};
+ const loop=()=>{if(!d)return;if(ly<90)scrollBy(0,-14);else if(ly>innerHeight-90)scrollBy(0,14);place(ly);raf=requestAnimationFrame(loop)};
+ L.addEventListener('pointerdown',e=>{const h=e.target.closest('.dh');if(!h)return;const c=h.closest('.card');if(L.querySelectorAll('.card').length<2)return;e.preventDefault();
+  const r=c.getBoundingClientRect();d={c,off:e.clientY-r.top,ox:e.clientX-r.left,ph:document.createElement('div')};
+  d.ph.className='ph';d.ph.style.height=r.height+'px';c.after(d.ph);
+  c.classList.add('drag');c.style.cssText='position:fixed;z-index:30;width:'+r.width+'px;left:'+r.left+'px;top:'+r.top+'px';
+  try{h.setPointerCapture(e.pointerId)}catch(_){}
+  document.body.style.userSelect='none';ly=e.clientY;lx=e.clientX;raf=requestAnimationFrame(loop)});
+ document.addEventListener('pointermove',e=>{if(!d)return;ly=e.clientY;lx=e.clientX;d.c.style.top=(e.clientY-d.off)+'px';d.c.style.left=(e.clientX-d.ox)+'px';place(ly)});
+ const end=ok=>{if(!d)return;cancelAnimationFrame(raf);const c=d.c;d.ph.replaceWith(c);c.classList.remove('drag');c.style.cssText='';d=null;document.body.style.userSelect='';
+  if(!ok){render();return}
+  if(fltOn()){say('برای جابه‌جایی، اول فیلترها را پاک کن');render();return}
+  const ids=[...L.querySelectorAll('.card')].map(x=>+x.dataset.id),m=new Map(alerts.map(a=>[a.id,a]));alerts=ids.map(i=>m.get(i)).filter(Boolean);
+  api('POST','/api/alerts/reorder',{ids}).catch(()=>{say('جابه‌جایی ذخیره نشد');load()})};
+ document.addEventListener('pointerup',()=>end(true));document.addEventListener('pointercancel',()=>end(false));
+})();
+let st={email:'',verified:false,provider:false};
+function paintSettings(){const c=$('#c-em');c.disabled=!st.verified;if(!st.verified)c.checked=false;$('#c-emh').textContent=st.verified?'':'(اول ایمیل را در ⚙️ تنظیمات تایید کن)';
+ const e=$('#emst');e.className='st '+(st.verified?'ok':'bad');e.textContent=st.verified?'✓ ایمیل تایید شده: '+st.email:(st.provider?'ایمیلی تایید نشده':'⚠️ سرویس ایمیل تنظیم نشده');$('#emrm').hidden=!st.verified}
+async function loadSettings(s0){try{st=s0||await api('GET','/api/settings')}catch(e){}paintSettings()}
+$('#gear').onclick=()=>{setSP('n');if(Date.now()-_setAt>45000){_setAt=Date.now();loadSettings();loadUser();loadTg()}$('#ss').classList.add('on')};
+$('#ssx').onclick=()=>closeSh('#ss');
+$('#tbtn').onclick=()=>{let m='system';try{m=localStorage.getItem('theme')||'system'}catch(e){}const nx=m==='system'?'light':m==='light'?'dark':'system';try{localStorage.setItem('theme',nx)}catch(e){}themeFx();applyTheme()};
+$('#emreq').onclick=async()=>{const em=$('#em').value.trim();if(!em){say('ایمیل را وارد کن');return}$('#emreq').disabled=true;try{await api('POST','/api/email/request',{email:em});$('#emcode').hidden=false;say('کد تایید به ایمیل فرستاده شد (۱۰ دقیقه اعتبار دارد)')}catch(e){say('ارسال نشد ('+e.message+')')}$('#emreq').disabled=false};
+$('#emver').onclick=async()=>{try{await api('POST','/api/email/verify',{code:$('#emc').value.trim()});$('#emcode').hidden=true;$('#emc').value='';await loadSettings();say('ایمیل تایید شد ✓')}catch(e){say('تایید نشد ('+e.message+')')}};
+$('#emrm').onclick=()=>ask('ایمیل حذف بشه؟ آلارم‌هایی که ایمیل دارن فقط از تلگرام اعلان می‌گیرن.',async()=>{await api('POST','/api/email/remove');await loadSettings()});
+$('#tst').onclick=async()=>{const b=$('#tst');b.disabled=true;try{const r=await api('POST','/api/test-notify');const f=(n,x)=>n+': '+(x.skipped?'— (ایمیل تایید نشده)':x.ok?'✓ فرستاده شد':'✗ '+x.error);say(f('تلگرام',r.tg)+'\n'+f('ایمیل',r.email))}catch(e){say('تست انجام نشد ('+e.message+')')}b.disabled=false};
+$('#out').onclick=async()=>{try{await api('POST','/api/logout')}catch(e){}try{localStorage.removeItem('acache')}catch(e){}location.reload()};
+let am='login',codeSent=false,lgOn=false,mailOk=true;
+const EM=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function setMode(m){am=m;codeSent=false;const L=m==='login',R=m==='register',F=m==='reset';
+ $('#lgt').textContent=L?'ورود به پنل':R?'ثبت‌نام — ساخت حساب':'بازیابی رمز';
+ $('#f-u').hidden=F;$('#f-p2').hidden=L;$('#f-c').hidden=true;$('#f-k').hidden=!(R&&!mailOk);
+ $('#lpl').textContent=L?'رمز عبور':'رمز جدید (حداقل ۸ کاراکتر)';
+ $('#pw').autocomplete=L?'current-password':'new-password';
+ $('#lgo').textContent=L?'ورود':'دریافت کد در ایمیل';
+ $('#lsw').textContent=L?'رمز را فراموش کردم':'بازگشت به ورود';$('#lsw').hidden=R;
+ $('#lge').textContent='';$('#lge').style.color=''}
+async function showLogin(){if(lgOn)return;lgOn=true;let r={registered:true,mail:true};try{r=await(await fetch('/api/auth/state',{credentials:'same-origin'})).json()}catch(e){}
+ mailOk=r.mail!==false;setMode(r.registered?'login':'register');$('#lg').classList.add('on');setTimeout(()=>$('#lu').focus(),50)}
+function done(){['#pw','#pw2','#lc','#lkey'].forEach(i=>$(i).value='');lgOn=false;closeSh('#lg');$('#lgo').disabled=false;load();checkLegacy()}
+async function doAuth(){const b=$('#lgo'),u=$('#lu').value.trim(),pw=$('#pw').value,e=$('#lge');e.textContent='';e.style.color='';
+ const bad=m=>{e.textContent=m;b.disabled=false};b.disabled=true;
+ try{
+  if(am==='login'){await api('POST','/api/login',{email:u,password:pw});return done()}
+  if(!codeSent){
+   if(pw.length<8)return bad('رمز باید حداقل ۸ کاراکتر باشد.');
+   if(pw!==$('#pw2').value)return bad('تکرار رمز یکسان نیست.');
+   if(am==='register'&&!EM.test(u))return bad('ایمیل معتبر وارد کن.');
+   if(am==='register'&&!mailOk&&!$('#lkey').value.trim())return bad('کلید API سرویس ایمیل را وارد کن.');
+   await api('POST','/api/auth/code',{purpose:am,email:u,password:pw,lang:LANG,resendKey:$('#lkey').value.trim(),from:$('#lfrom').value.trim()});
+   codeSent=true;$('#f-c').hidden=false;b.textContent='تایید و ادامه';e.textContent='کد ۶ رقمی به ایمیلت فرستاده شد (پوشه‌ی اسپم را هم ببین).';e.style.color='var(--long)';$('#lc').focus();b.disabled=false;return}
+  await api('POST','/api/auth/confirm',{code:$('#lc').value.trim()});done()
+ }catch(x){const m=String(x.message);bad(m.includes('wrong password')?'ایمیل یا رمز اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('not allowed')?'این ایمیل اجازه‌ی ثبت‌نام ندارد.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('429')?'تلاش زیاد؛ کمی بعد دوباره امتحان کن.':'خطا ('+m+')')}}
+$('#lang').textContent=LANG==='en'?'فا':'EN';$('#lgl').textContent=LANG==='en'?'فارسی':'English';$('#lang').onclick=$('#lgl').onclick=()=>setLang(LANG==='en'?'fa':'en');
+$('#lgo').onclick=doAuth;$('#lsw').onclick=()=>setMode(am==='login'?'reset':'login');
+['lu','pw','pw2','lc'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')doAuth()}));
+async function loadUser(){try{const r=await api('GET','/api/auth/state');$('#acu').textContent=r.user;$('#aleg').hidden=!r.legacy;$('#akey').hidden=r.mail!==false}catch(e){}}
+let aemSent=false;
+$('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disabled=true;
+ try{
+  if(!aemSent){
+   if(!EM.test(em)){say('ایمیل معتبر وارد کن.');return}
+   if(!$('#ac').value){say('رمز فعلی را وارد کن.');return}
+   await api('POST','/api/auth/code',{purpose:'email',email:em,current:$('#ac').value,lang:LANG,resendKey:$('#akey').value.trim(),from:''});
+   aemSent=true;$('#acode').hidden=false;b.textContent='تایید ایمیل';say('کد به ایمیل جدید فرستاده شد (اسپم را هم ببین).')
+  }else{
+   await api('POST','/api/auth/confirm',{code:$('#acode').value.trim()});
+   aemSent=false;$('#acode').hidden=true;$('#acode').value='';$('#ae').value='';$('#ac').value='';b.textContent='ارسال کد به ایمیل جدید';say('ایمیل ثبت شد ✓');loadUser()
+  }
+ }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
+ finally{b.disabled=false}};
+function setSP(p){document.querySelectorAll('#sst button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));document.querySelectorAll('#ss .sp').forEach(x=>x.classList.toggle('on',x.dataset.p===p))}
+document.querySelectorAll('#sst button').forEach(b=>b.onclick=()=>setSP(b.dataset.p));
+async function checkLegacy(){try{const r=await api('GET','/api/auth/state');if(r.loggedIn)syncLang();if(r.loggedIn&&r.legacy){setSP('a');$('#ss').classList.add('on');loadUser();loadTg();loadSettings();say('حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.')}}catch(e){}}
+$('#acs').onclick=async()=>{if($('#ap').value.length<8){say('رمز جدید باید حداقل ۸ کاراکتر باشد.');return}try{await api('POST','/api/auth/change',{current:$('#ac').value,password:$('#ap').value});['#ac','#ap'].forEach(i=>$(i).value='');say('رمز تغییر کرد ✓');}catch(e){say(String(e.message).includes('wrong')?'رمز فعلی اشتباه است.':'ذخیره نشد ('+e.message+')')}};
+let tgs={};
+function paintTg(){const e=$('#tgst');e.className='st '+(tgs.connected?'ok':'bad');
+ e.textContent=tgs.connected?'✓ متصل: @'+tgs.bot:(tgs.hasToken?'ربات @'+tgs.bot+' ثبت شد — منتظر اتصال چت':(tgs.viaEnv?'از تنظیمات ورکر استفاده می‌شود (برای تغییر، توکن جدید بده)':'ربات متصل نیست'));
+ $('#tgstep').hidden=!(tgs.hasToken&&!tgs.connected);if(tgs.connected)$('#tgpick').innerHTML='';$('#tglink').href=tgs.link||'#';$('#tgoff').hidden=!tgs.hasToken}
+async function loadTg(){try{tgs=await api('GET','/api/tg')}catch(e){}paintTg()}
+$('#tgset').onclick=async()=>{const v=$('#tgt').value.trim();if(!v){say('توکن ربات را وارد کن');return}try{tgs=await api('POST','/api/tg/token',{token:v});$('#tgt').value='';paintTg();if(tgs.wh)say('یک Webhook قدیمی روی این ربات بود و حذف شد. حالا لینک را بزن و در تلگرام Start را (دوباره) بزن.')}catch(e){say(/invalid|rejected/.test(e.message)?'توکن معتبر نیست.':'ثبت نشد ('+e.message+')')}};
+$('#tgdet').onclick=async()=>{try{const r=await api('POST','/api/tg/detect');tgs=r;paintTg();
+ if(r.pick&&r.pick.length){$('#tgpick').innerHTML='<div class="st" style="margin:6px 0">این چت‌ها به ربات پیام داده‌اند. چت خودت را انتخاب کن:</div>'+r.pick.map(c=>'<button class="lk" style="display:block" data-c="'+esc(c.id)+'">'+esc(c.name)+(c.username?' (@'+esc(c.username)+')':'')+'</button>').join('');return}
+ say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}
+ catch(e){const m=String(e.message);say(m.includes('404')?'هنوز پیامی در ربات ندیدم. در تلگرام به ربات @'+tgs.bot+' یک پیام بفرست (مثلاً /start) و دوباره «تشخیص» را بزن.':/other getUpdates|Conflict/i.test(m)?'یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.':'تشخیص انجام نشد ('+m+')')}};
+$('#tgpick').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{tgs=await api('POST','/api/tg/choose',{chat:b.dataset.c});paintTg();say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}catch(x){say('انجام نشد ('+x.message+')')}};
+$('#tgoff').onclick=()=>ask('ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.',async()=>{tgs=await api('POST','/api/tg/disconnect');paintTg()});
+async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=$('#st');
+ if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
+ const m=Math.round((r.now-r.t)/60000);
+ if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+ else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+ else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
+async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
+ if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
+ const act=alerts.filter(a=>!doneA(a));if(!act.length)return;const cs=[...new Set(act.map(a=>a.coin))];
+ try{prices=await api('GET','/api/prices?coins='+cs.join(','))}catch(e){}
+ act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
+  const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
+  add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
+$('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
+async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
+markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
+try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArray(c.alerts)){alerts=c.alerts.filter(a=>a&&Array.isArray(a.targets)&&a.targets.length);if(Array.isArray(c.cats))cats=c.cats;render();paintChips()}}catch(e){}
+load();setTimeout(checkLegacy,1200);setTimeout(()=>{if(tab==='a'&&!witems.length&&!sitems.length)loadW()},4000);setTimeout(()=>document.body.classList.remove('boot'),450);
+setInterval(()=>{if(!document.hidden&&tab==='a')refresh()},60000);
+setInterval(()=>{if(!document.hidden&&tab==='a')liveTick()},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab==='a'&&Date.now()-_aAt>15000)refresh()});
+(()=>{let t=location.hash.slice(1);if(!(t.length===1&&TABS.includes(t))){try{t=localStorage.getItem('tab')||''}catch(e){t=''}}if(t.length===1&&TABS.includes(t)&&t!=='a')show(t)})();
+</script></body></html>`;
+
+
+// The page has no per-user data, so the browser may keep it and only revalidate (304 = a few bytes instead of ~170 KB).
+let _h = 2166136261;
+for (let i = 0; i < APP_HTML.length; i += 7) _h = Math.imul(_h ^ APP_HTML.charCodeAt(i), 16777619);
+const HTML_ETAG = '"' + (_h >>> 0).toString(36) + "-" + APP_HTML.length.toString(36) + '"';
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      try { return await handleApi(request, env, url); }
+      catch (e) {
+        const m = String((e && e.message) || e);
+        console.log("[api error]", m);
+        return new Response(JSON.stringify({ error: /limit exceeded/i.test(m) ? "kv limit: daily write quota is used up, try again after 00:00 UTC" : m.slice(0, 200) }), { status: 500, headers: { "content-type": "application/json" } });
+      }
+    }
+    if (url.pathname === "/manifest.webmanifest") return staticRes(MANIFEST, "application/manifest+json");
+    if (url.pathname === "/icon.svg") return staticRes(ICON_SVG, "image/svg+xml");
+    if (url.pathname === "/icon-192.png") return staticRes(b64(ICON_192), "image/png");
+    if (url.pathname === "/icon-512.png") return staticRes(b64(ICON_512), "image/png");
+    if (url.pathname === "/sw.js") return new Response(SW_JS, { headers: { "content-type": "text/javascript", "cache-control": "no-cache", "service-worker-allowed": "/" } });
+    if (url.pathname === "/" || url.pathname === "/app") {
+      if (request.headers.get("if-none-match") === HTML_ETAG) return new Response(null, { status: 304, headers: { etag: HTML_ETAG, "cache-control": "no-cache" } });
+      return new Response(APP_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+          etag: HTML_ETAG,
+          "x-robots-tag": "noindex, nofollow",
+          "x-frame-options": "DENY",
+          ...SEC_HEADERS,
+        },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledCheck(env));
+  },
+};+cf(fees):'')+' = 
+}
+document.addEventListener('input',e=>{if(e.target.closest('#p-c'))calc()});
+(function(){
+ let d=null,ly=0,raf=0;
+ const L=$('#list');
+ let lx=0;const place=y=>{const cs=[...L.querySelectorAll('.card:not(.drag)')];if(!cs.length)return;const R=cs.map(o=>o.getBoundingClientRect()),multi=new Set(R.map(r=>Math.round(r.left))).size>1;let bi=0,bd=1e18;R.forEach((r,i)=>{const dx=lx-(r.left+r.width/2),dy=y-(r.top+r.height/2),dd=dx*dx+dy*dy;if(dd<bd){bd=dd;bi=i}});const r=R[bi],before=multi?(lx>r.left+r.width/2):(y<r.top+r.height/2);before?L.insertBefore(d.ph,cs[bi]):cs[bi].after(d.ph)};
+ const loop=()=>{if(!d)return;if(ly<90)scrollBy(0,-14);else if(ly>innerHeight-90)scrollBy(0,14);place(ly);raf=requestAnimationFrame(loop)};
+ L.addEventListener('pointerdown',e=>{const h=e.target.closest('.dh');if(!h)return;const c=h.closest('.card');if(L.querySelectorAll('.card').length<2)return;e.preventDefault();
+  const r=c.getBoundingClientRect();d={c,off:e.clientY-r.top,ox:e.clientX-r.left,ph:document.createElement('div')};
+  d.ph.className='ph';d.ph.style.height=r.height+'px';c.after(d.ph);
+  c.classList.add('drag');c.style.cssText='position:fixed;z-index:30;width:'+r.width+'px;left:'+r.left+'px;top:'+r.top+'px';
+  try{h.setPointerCapture(e.pointerId)}catch(_){}
+  document.body.style.userSelect='none';ly=e.clientY;lx=e.clientX;raf=requestAnimationFrame(loop)});
+ document.addEventListener('pointermove',e=>{if(!d)return;ly=e.clientY;lx=e.clientX;d.c.style.top=(e.clientY-d.off)+'px';d.c.style.left=(e.clientX-d.ox)+'px';place(ly)});
+ const end=ok=>{if(!d)return;cancelAnimationFrame(raf);const c=d.c;d.ph.replaceWith(c);c.classList.remove('drag');c.style.cssText='';d=null;document.body.style.userSelect='';
+  if(!ok){render();return}
+  if(fltOn()){say('برای جابه‌جایی، اول فیلترها را پاک کن');render();return}
+  const ids=[...L.querySelectorAll('.card')].map(x=>+x.dataset.id),m=new Map(alerts.map(a=>[a.id,a]));alerts=ids.map(i=>m.get(i)).filter(Boolean);
+  api('POST','/api/alerts/reorder',{ids}).catch(()=>{say('جابه‌جایی ذخیره نشد');load()})};
+ document.addEventListener('pointerup',()=>end(true));document.addEventListener('pointercancel',()=>end(false));
+})();
+let st={email:'',verified:false,provider:false};
+function paintSettings(){const c=$('#c-em');c.disabled=!st.verified;if(!st.verified)c.checked=false;$('#c-emh').textContent=st.verified?'':'(اول ایمیل را در ⚙️ تنظیمات تایید کن)';
+ const e=$('#emst');e.className='st '+(st.verified?'ok':'bad');e.textContent=st.verified?'✓ ایمیل تایید شده: '+st.email:(st.provider?'ایمیلی تایید نشده':'⚠️ سرویس ایمیل تنظیم نشده');$('#emrm').hidden=!st.verified}
+async function loadSettings(s0){try{st=s0||await api('GET','/api/settings')}catch(e){}paintSettings()}
+$('#gear').onclick=()=>{setSP('n');if(Date.now()-_setAt>45000){_setAt=Date.now();loadSettings();loadUser();loadTg()}$('#ss').classList.add('on')};
+$('#ssx').onclick=()=>closeSh('#ss');
+$('#tbtn').onclick=()=>{let m='system';try{m=localStorage.getItem('theme')||'system'}catch(e){}const nx=m==='system'?'light':m==='light'?'dark':'system';try{localStorage.setItem('theme',nx)}catch(e){}themeFx();applyTheme()};
+$('#emreq').onclick=async()=>{const em=$('#em').value.trim();if(!em){say('ایمیل را وارد کن');return}$('#emreq').disabled=true;try{await api('POST','/api/email/request',{email:em});$('#emcode').hidden=false;say('کد تایید به ایمیل فرستاده شد (۱۰ دقیقه اعتبار دارد)')}catch(e){say('ارسال نشد ('+e.message+')')}$('#emreq').disabled=false};
+$('#emver').onclick=async()=>{try{await api('POST','/api/email/verify',{code:$('#emc').value.trim()});$('#emcode').hidden=true;$('#emc').value='';await loadSettings();say('ایمیل تایید شد ✓')}catch(e){say('تایید نشد ('+e.message+')')}};
+$('#emrm').onclick=()=>ask('ایمیل حذف بشه؟ آلارم‌هایی که ایمیل دارن فقط از تلگرام اعلان می‌گیرن.',async()=>{await api('POST','/api/email/remove');await loadSettings()});
+$('#tst').onclick=async()=>{const b=$('#tst');b.disabled=true;try{const r=await api('POST','/api/test-notify');const f=(n,x)=>n+': '+(x.skipped?'— (ایمیل تایید نشده)':x.ok?'✓ فرستاده شد':'✗ '+x.error);say(f('تلگرام',r.tg)+'\n'+f('ایمیل',r.email))}catch(e){say('تست انجام نشد ('+e.message+')')}b.disabled=false};
+$('#out').onclick=async()=>{try{await api('POST','/api/logout')}catch(e){}try{localStorage.removeItem('acache')}catch(e){}location.reload()};
+let am='login',codeSent=false,lgOn=false,mailOk=true;
+const EM=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function setMode(m){am=m;codeSent=false;const L=m==='login',R=m==='register',F=m==='reset';
+ $('#lgt').textContent=L?'ورود به پنل':R?'ثبت‌نام — ساخت حساب':'بازیابی رمز';
+ $('#f-u').hidden=F;$('#f-p2').hidden=L;$('#f-c').hidden=true;$('#f-k').hidden=!(R&&!mailOk);
+ $('#lpl').textContent=L?'رمز عبور':'رمز جدید (حداقل ۸ کاراکتر)';
+ $('#pw').autocomplete=L?'current-password':'new-password';
+ $('#lgo').textContent=L?'ورود':'دریافت کد در ایمیل';
+ $('#lsw').textContent=L?'رمز را فراموش کردم':'بازگشت به ورود';$('#lsw').hidden=R;
+ $('#lge').textContent='';$('#lge').style.color=''}
+async function showLogin(){if(lgOn)return;lgOn=true;let r={registered:true,mail:true};try{r=await(await fetch('/api/auth/state',{credentials:'same-origin'})).json()}catch(e){}
+ mailOk=r.mail!==false;setMode(r.registered?'login':'register');$('#lg').classList.add('on');setTimeout(()=>$('#lu').focus(),50)}
+function done(){['#pw','#pw2','#lc','#lkey'].forEach(i=>$(i).value='');lgOn=false;closeSh('#lg');$('#lgo').disabled=false;load();checkLegacy()}
+async function doAuth(){const b=$('#lgo'),u=$('#lu').value.trim(),pw=$('#pw').value,e=$('#lge');e.textContent='';e.style.color='';
+ const bad=m=>{e.textContent=m;b.disabled=false};b.disabled=true;
+ try{
+  if(am==='login'){await api('POST','/api/login',{email:u,password:pw});return done()}
+  if(!codeSent){
+   if(pw.length<8)return bad('رمز باید حداقل ۸ کاراکتر باشد.');
+   if(pw!==$('#pw2').value)return bad('تکرار رمز یکسان نیست.');
+   if(am==='register'&&!EM.test(u))return bad('ایمیل معتبر وارد کن.');
+   if(am==='register'&&!mailOk&&!$('#lkey').value.trim())return bad('کلید API سرویس ایمیل را وارد کن.');
+   await api('POST','/api/auth/code',{purpose:am,email:u,password:pw,lang:LANG,resendKey:$('#lkey').value.trim(),from:$('#lfrom').value.trim()});
+   codeSent=true;$('#f-c').hidden=false;b.textContent='تایید و ادامه';e.textContent='کد ۶ رقمی به ایمیلت فرستاده شد (پوشه‌ی اسپم را هم ببین).';e.style.color='var(--long)';$('#lc').focus();b.disabled=false;return}
+  await api('POST','/api/auth/confirm',{code:$('#lc').value.trim()});done()
+ }catch(x){const m=String(x.message);bad(m.includes('wrong password')?'ایمیل یا رمز اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('not allowed')?'این ایمیل اجازه‌ی ثبت‌نام ندارد.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('429')?'تلاش زیاد؛ کمی بعد دوباره امتحان کن.':'خطا ('+m+')')}}
+$('#lang').textContent=LANG==='en'?'فا':'EN';$('#lgl').textContent=LANG==='en'?'فارسی':'English';$('#lang').onclick=$('#lgl').onclick=()=>setLang(LANG==='en'?'fa':'en');
+$('#lgo').onclick=doAuth;$('#lsw').onclick=()=>setMode(am==='login'?'reset':'login');
+['lu','pw','pw2','lc'].forEach(id=>$('#'+id).addEventListener('keydown',e=>{if(e.key==='Enter')doAuth()}));
+async function loadUser(){try{const r=await api('GET','/api/auth/state');$('#acu').textContent=r.user;$('#aleg').hidden=!r.legacy;$('#akey').hidden=r.mail!==false}catch(e){}}
+let aemSent=false;
+$('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disabled=true;
+ try{
+  if(!aemSent){
+   if(!EM.test(em)){say('ایمیل معتبر وارد کن.');return}
+   if(!$('#ac').value){say('رمز فعلی را وارد کن.');return}
+   await api('POST','/api/auth/code',{purpose:'email',email:em,current:$('#ac').value,lang:LANG,resendKey:$('#akey').value.trim(),from:''});
+   aemSent=true;$('#acode').hidden=false;b.textContent='تایید ایمیل';say('کد به ایمیل جدید فرستاده شد (اسپم را هم ببین).')
+  }else{
+   await api('POST','/api/auth/confirm',{code:$('#acode').value.trim()});
+   aemSent=false;$('#acode').hidden=true;$('#acode').value='';$('#ae').value='';$('#ac').value='';b.textContent='ارسال کد به ایمیل جدید';say('ایمیل ثبت شد ✓');loadUser()
+  }
+ }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
+ finally{b.disabled=false}};
+function setSP(p){document.querySelectorAll('#sst button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));document.querySelectorAll('#ss .sp').forEach(x=>x.classList.toggle('on',x.dataset.p===p))}
+document.querySelectorAll('#sst button').forEach(b=>b.onclick=()=>setSP(b.dataset.p));
+async function checkLegacy(){try{const r=await api('GET','/api/auth/state');if(r.loggedIn)syncLang();if(r.loggedIn&&r.legacy){setSP('a');$('#ss').classList.add('on');loadUser();loadTg();loadSettings();say('حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.')}}catch(e){}}
+$('#acs').onclick=async()=>{if($('#ap').value.length<8){say('رمز جدید باید حداقل ۸ کاراکتر باشد.');return}try{await api('POST','/api/auth/change',{current:$('#ac').value,password:$('#ap').value});['#ac','#ap'].forEach(i=>$(i).value='');say('رمز تغییر کرد ✓');}catch(e){say(String(e.message).includes('wrong')?'رمز فعلی اشتباه است.':'ذخیره نشد ('+e.message+')')}};
+let tgs={};
+function paintTg(){const e=$('#tgst');e.className='st '+(tgs.connected?'ok':'bad');
+ e.textContent=tgs.connected?'✓ متصل: @'+tgs.bot:(tgs.hasToken?'ربات @'+tgs.bot+' ثبت شد — منتظر اتصال چت':(tgs.viaEnv?'از تنظیمات ورکر استفاده می‌شود (برای تغییر، توکن جدید بده)':'ربات متصل نیست'));
+ $('#tgstep').hidden=!(tgs.hasToken&&!tgs.connected);if(tgs.connected)$('#tgpick').innerHTML='';$('#tglink').href=tgs.link||'#';$('#tgoff').hidden=!tgs.hasToken}
+async function loadTg(){try{tgs=await api('GET','/api/tg')}catch(e){}paintTg()}
+$('#tgset').onclick=async()=>{const v=$('#tgt').value.trim();if(!v){say('توکن ربات را وارد کن');return}try{tgs=await api('POST','/api/tg/token',{token:v});$('#tgt').value='';paintTg();if(tgs.wh)say('یک Webhook قدیمی روی این ربات بود و حذف شد. حالا لینک را بزن و در تلگرام Start را (دوباره) بزن.')}catch(e){say(/invalid|rejected/.test(e.message)?'توکن معتبر نیست.':'ثبت نشد ('+e.message+')')}};
+$('#tgdet').onclick=async()=>{try{const r=await api('POST','/api/tg/detect');tgs=r;paintTg();
+ if(r.pick&&r.pick.length){$('#tgpick').innerHTML='<div class="st" style="margin:6px 0">این چت‌ها به ربات پیام داده‌اند. چت خودت را انتخاب کن:</div>'+r.pick.map(c=>'<button class="lk" style="display:block" data-c="'+esc(c.id)+'">'+esc(c.name)+(c.username?' (@'+esc(c.username)+')':'')+'</button>').join('');return}
+ say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}
+ catch(e){const m=String(e.message);say(m.includes('404')?'هنوز پیامی در ربات ندیدم. در تلگرام به ربات @'+tgs.bot+' یک پیام بفرست (مثلاً /start) و دوباره «تشخیص» را بزن.':/other getUpdates|Conflict/i.test(m)?'یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.':'تشخیص انجام نشد ('+m+')')}};
+$('#tgpick').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{tgs=await api('POST','/api/tg/choose',{chat:b.dataset.c});paintTg();say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}catch(x){say('انجام نشد ('+x.message+')')}};
+$('#tgoff').onclick=()=>ask('ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.',async()=>{tgs=await api('POST','/api/tg/disconnect');paintTg()});
+async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=$('#st');
+ if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
+ const m=Math.round((r.now-r.t)/60000);
+ if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+ else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+ else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
+async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
+ if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
+ const act=alerts.filter(a=>!doneA(a));if(!act.length)return;const cs=[...new Set(act.map(a=>a.coin))];
+ try{prices=await api('GET','/api/prices?coins='+cs.join(','))}catch(e){}
+ act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
+  const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
+  add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
+$('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
+async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
+markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
+try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArray(c.alerts)){alerts=c.alerts.filter(a=>a&&Array.isArray(a.targets)&&a.targets.length);if(Array.isArray(c.cats))cats=c.cats;render();paintChips()}}catch(e){}
+load();setTimeout(checkLegacy,1200);setTimeout(()=>{if(tab==='a'&&!witems.length&&!sitems.length)loadW()},4000);setTimeout(()=>document.body.classList.remove('boot'),450);
+setInterval(()=>{if(!document.hidden&&tab==='a')refresh()},60000);
+setInterval(()=>{if(!document.hidden&&tab==='a')liveTick()},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab==='a'&&Date.now()-_aAt>15000)refresh()});
+(()=>{let t=location.hash.slice(1);if(!(t.length===1&&TABS.includes(t))){try{t=localStorage.getItem('tab')||''}catch(e){t=''}}if(t.length===1&&TABS.includes(t)&&t!=='a')show(t)})();
+</script></body></html>`;
+
+
+// The page has no per-user data, so the browser may keep it and only revalidate (304 = a few bytes instead of ~170 KB).
+let _h = 2166136261;
+for (let i = 0; i < APP_HTML.length; i += 7) _h = Math.imul(_h ^ APP_HTML.charCodeAt(i), 16777619);
+const HTML_ETAG = '"' + (_h >>> 0).toString(36) + "-" + APP_HTML.length.toString(36) + '"';
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) {
+      try { return await handleApi(request, env, url); }
+      catch (e) {
+        const m = String((e && e.message) || e);
+        console.log("[api error]", m);
+        return new Response(JSON.stringify({ error: /limit exceeded/i.test(m) ? "kv limit: daily write quota is used up, try again after 00:00 UTC" : m.slice(0, 200) }), { status: 500, headers: { "content-type": "application/json" } });
+      }
+    }
+    if (url.pathname === "/manifest.webmanifest") return staticRes(MANIFEST, "application/manifest+json");
+    if (url.pathname === "/icon.svg") return staticRes(ICON_SVG, "image/svg+xml");
+    if (url.pathname === "/icon-192.png") return staticRes(b64(ICON_192), "image/png");
+    if (url.pathname === "/icon-512.png") return staticRes(b64(ICON_512), "image/png");
+    if (url.pathname === "/sw.js") return new Response(SW_JS, { headers: { "content-type": "text/javascript", "cache-control": "no-cache", "service-worker-allowed": "/" } });
+    if (url.pathname === "/" || url.pathname === "/app") {
+      if (request.headers.get("if-none-match") === HTML_ETAG) return new Response(null, { status: 304, headers: { etag: HTML_ETAG, "cache-control": "no-cache" } });
+      return new Response(APP_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+          etag: HTML_ETAG,
+          "x-robots-tag": "noindex, nofollow",
+          "x-frame-options": "DENY",
+          ...SEC_HEADERS,
+        },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledCheck(env));
+  },
+};+cf(reward):'');
 }
 document.addEventListener('input',e=>{if(e.target.closest('#p-c'))calc()});
 (function(){
