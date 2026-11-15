@@ -2123,12 +2123,25 @@ $('#tgdet').onclick=async()=>{try{const r=await api('POST','/api/tg/detect');tgs
  catch(e){const m=String(e.message);say(m.includes('404')?'هنوز پیامی در ربات ندیدم. در تلگرام به ربات @'+tgs.bot+' یک پیام بفرست (مثلاً /start) و دوباره «تشخیص» را بزن.':/other getUpdates|Conflict/i.test(m)?'یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.':'تشخیص انجام نشد ('+m+')')}};
 $('#tgpick').onclick=async e=>{const b=e.target.closest('button');if(!b)return;try{tgs=await api('POST','/api/tg/choose',{chat:b.dataset.c});paintTg();say('ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)')}catch(x){say('انجام نشد ('+x.message+')')}};
 $('#tgoff').onclick=()=>ask('ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.',async()=>{tgs=await api('POST','/api/tg/disconnect');paintTg()});
-async function loadStatus(r0){try{const r=r0||await api('GET','/api/status'),el=$('#st');
- if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)';return}
- const m=Math.round((r.now-r.t)/60000);
- if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
- else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
- else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}paintDiag(r)}catch(e){}finally{const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'))}}
+async function loadStatus(r0){
+ const el=$('#st');
+ try{
+  const r=r0||await api('GET','/api/status');
+  if(!r.t){el.className='st bad';el.textContent='⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)'}
+  else{
+   const m=Math.round((r.now-r.t)/60000);
+   if(m>12){el.className='st bad';el.textContent='⚠️ آخرین چک خودکار '+m+' دقیقه پیش بوده — Cron Trigger را چک کن'}
+   else if(!r.e&&!r.m){el.className='st ok';el.textContent='✅ همه چیز سالم است — '+(r.p?r.p+' آلارم فعال زیر نظر است':'آلارم فعالی نیست')+' · آخرین چک: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش';if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+   else{el.className=(r.e||r.m)?'st bad':'st ok';el.textContent=(r.e?'⚠️ خطا در چک: '+r.e:'✓ چک خودکار فعال')+' (آخرین ثبت: '+(m<1?'چند ثانیه':m+' دقیقه')+' پیش)'+(r.m?' — قیمت این کوین‌ها گرفته نمی‌شود: '+r.m:'');if(r.s){const b=document.createElement('b');b.textContent=' · '+r.s;el.appendChild(b)}}
+  }
+  await paintDiag(r);
+ }catch(e){
+  el.className='st bad';el.textContent='⚠️ خطا در دریافت وضعیت: '+e.message;
+  const box=$('#stn');if(box)box.textContent='خطا در تازه‌سازی لاگ‌ها: '+e.message;
+ }finally{
+  const g=$('#gear'),e2=$('#st');if(g&&e2)g.classList.toggle('warn',e2.classList.contains('bad'));
+ }
+}
 const pfd=v=>Number(v).toLocaleString('en-US',{maximumFractionDigits:v>=1000?2:v>=1?4:6});
 async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='';const add=(t,c)=>{const d=document.createElement('div');if(c)d.className=c;d.textContent=t;box.appendChild(d)};
  if(r&&r.n){const m=Math.max(0,Math.round((r.now-r.n.t)/60000)),w=m<1?'چند ثانیه':m+' دقیقه';add(r.n.ok?'📨 آخرین پیام آلارم: ✓ ارسال شد ('+w+' پیش)':'📨 آخرین پیام آلارم: ⚠️ ارسال نشد — '+(r.n.e||'نامشخص')+' ('+w+' پیش) — دوباره تلاش می‌شود',r.n.ok?'ok':'bad')}
@@ -2137,7 +2150,20 @@ async function paintDiag(r){const box=$('#stn');if(!box)return;box.textContent='
  act.slice(0,12).forEach(a=>{const px=prices[a.coin];if(px==null){add('📍 '+a.coin+': قیمت گرفته نمی‌شود','bad');return}
   const ts=a.targets.filter(t=>!(a.triggered||[]).includes(t.id)).map(t=>t.price);if(!ts.length)return;const g=ts.reduce((x,y)=>Math.abs(y-px)<Math.abs(x-px)?y:x),dp=Math.abs((g-px)/px*100);
   add('📍 '+a.coin+': قیمت الان '+pfd(px)+' · نزدیک‌ترین هدف '+pfd(g)+' ('+dp.toFixed(2)+'٪ فاصله)')})}
-$('#logr').onclick=()=>{$('#st').textContent='…';loadStatus()};
+$('#logr').onclick=async()=>{
+ const b=$('#logr');if(b.disabled)return;b.disabled=true;b.textContent='در حال تازه‌سازی…';
+ try{
+  const [status,d]=await Promise.all([api('GET','/api/status'),api('GET','/api/alerts?x=1')]);
+  const a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);
+  if(Array.isArray(d.cats))cats=d.cats;
+  if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}
+  _aAt=Date.now();
+  await loadStatus(status);
+ }catch(e){
+  $('#st').className='st bad';$('#st').textContent='⚠️ تازه‌سازی انجام نشد';
+  $('#stn').textContent='خطا: '+e.message;
+ }finally{b.disabled=false;b.textContent='تازه‌سازی'}
+};
 async function refresh(){let d0=null;try{const d=await api('GET','/api/alerts?x=1'),a=(d.alerts||[]).filter(x=>x&&Array.isArray(x.targets)&&x.targets.length);d0=d;if(Array.isArray(d.cats))cats=d.cats;_aAt=Date.now();if(JSON.stringify(a)!==JSON.stringify(alerts)){alerts=a;render();cacheA()}}catch(e){}loadPrices();loadStatus(d0&&d0.status)}
 markF();paintSw();paintCatSel();paintWCatSel();paintSCatSel();$('#fq').value=flt.q;$('#wq').value=wFlt.q;$('#sq').value=sFlt.q;document.body.classList.add('boot');
 try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArray(c.alerts)){alerts=c.alerts.filter(a=>a&&Array.isArray(a.targets)&&a.targets.length);if(Array.isArray(c.cats))cats=c.cats;render();paintChips()}}catch(e){}
