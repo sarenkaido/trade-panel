@@ -289,13 +289,13 @@ async function checkPricesOnce(env) {
   _lastInfo = { pending: pending.length, missing: [] };
   if (pending.length === 0) return [];
 
-  const coinsP = [...new Set(pending.map((a) => a.coin))].slice(0, 7);
+  const coinsP = [...new Set(pending.map((a) => a.coin))].slice(0, 6);
   const priceMap = {};
   await Promise.all(coinsP.map(async (coin) => { priceMap[coin] = await getPrice(coin); }));
 
-  // Worst-case fallback: 7 venues × 5 symbols + up to 3 candle sources × 5 = 50 requests.
+  // Worst-case budget: up to 8 price requests × 4 symbols + 3 candle sources × 4 = 44 requests.
   const rangeMap = {};
-  if (coinsP.length <= 5) await Promise.all(coinsP.map(async (coin) => { const created = pending.filter((a) => a.coin === coin && a.created_at).map((a) => a.created_at).sort()[0]; rangeMap[coin] = await getRange(coin, created); }));
+  if (coinsP.length <= 4) await Promise.all(coinsP.map(async (coin) => { const created = pending.filter((a) => a.coin === coin && a.created_at).map((a) => a.created_at).sort()[0]; rangeMap[coin] = await getRange(coin, created); }));
 
   const newMsgs = [];
   const updates = {};
