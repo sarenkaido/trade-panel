@@ -33,16 +33,16 @@ jobs:
         run: |
           if [ -z "$KV_ID" ]; then echo "::error::Secret KV_NAMESPACE_ID is missing (GitHub > Settings > Secrets and variables > Actions)"; exit 1; fi
           sed -i "s/PUT_YOUR_KV_NAMESPACE_ID_HERE/$KV_ID/" wrangler.toml
-      - name: Attach D1 database (optional)
+      - name: Attach D1 database (required)
         env:
           D1_ID: ${{ secrets.D1_DATABASE_ID }}
         run: |
-          if [ -n "$D1_ID" ]; then
-            printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "alert-db"\ndatabase_id = "%s"\n' "$D1_ID" >> wrangler.toml
-            echo "D1 attached"
-          else
-            echo "D1_DATABASE_ID not set: using KV only"
+          if [ -z "$D1_ID" ]; then
+            echo "::error::Secret D1_DATABASE_ID is required. Create the alert-db D1 database and add its ID in GitHub Actions secrets."
+            exit 1
           fi
+          printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "alert-db"\ndatabase_id = "%s"\n' "$D1_ID" >> wrangler.toml
+          echo "D1 attached"
       - name: Deploy
         uses: cloudflare/wrangler-action@v3
         with:
