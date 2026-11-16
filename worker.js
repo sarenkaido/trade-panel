@@ -85,7 +85,10 @@ async function tgToken(env) { return (await kvGetJSON(env, "tg", {})).token || e
 let _dbInit = null;
 async function dbReady(env) {
   if (!env.DB) return false;
-  if (!_dbInit) _dbInit = env.DB.exec("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID").catch((e) => { _dbInit = null; throw e; });
+  if (!_dbInit) _dbInit = env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS rate_limits (k TEXT PRIMARY KEY, n INTEGER NOT NULL, window_start INTEGER NOT NULL) WITHOUT ROWID")
+  ]).catch((e) => { _dbInit = null; throw e; });
   await _dbInit;
   return true;
 }
@@ -465,28 +468,20 @@ async function runScheduledCheck(env) {
     }
     if (tgBlocks.length) {
       const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
-      if (failed.length) {
-        for (const a of fresh.alerts || []) {
-          const tids = failed.filter((f) => f.aid === a.id).map((f) => f.tid);
-          if (tids.length) {
-            a.triggered = (a.triggered || []).filter((x) => !tids.includes(x));
-            if (a.last_triggered) for (const tid of tids) delete a.last_triggered[String(tid)];
-            for (const tid of tids) {
-              const target = a.targets.find((x) => (x.id || 0) === tid);
-              const channels = target ? (a.retry_ch || a.ch || ["tg"]) : ["tg"];
-              a.retry_ch = [...new Set([...(channels || []), "tg"])];
-            }
-          }
+      for (const a of fresh.alerts || []) {
+        const failedIds = failed.filter((f) => f.aid === a.id).map((f) => f.tid);
+        if (failedIds.length) {
+          a.triggered = (a.triggered || []).filter((x) => !failedIds.includes(x));
+          if (a.last_triggered) for (const tid of failedIds) delete a.last_triggered[String(tid)];
+          a.retry_ch = [...new Set([...(a.retry_ch || []), "tg"])];
         }
-        for (const a of fresh.alerts || []) {
-          const sentIds = tgBlocks.filter((f) => f.aid === a.id && !failed.some((x) => x.aid === f.aid && x.tid === f.tid)).map((f) => f.tid);
-          for (const tid of sentIds) {
-            if (a.retry_ch) a.retry_ch = a.retry_ch.filter((ch) => ch !== "tg");
-            if (a.retry_ch && !a.retry_ch.length) delete a.retry_ch;
-          }
+        const sentIds = tgBlocks.filter((f) => f.aid === a.id && !failed.some((x) => x.aid === f.aid && x.tid === f.tid)).map((f) => f.tid);
+        if (sentIds.length && a.retry_ch) {
+          a.retry_ch = a.retry_ch.filter((ch) => ch !== "tg");
+          if (!a.retry_ch.length) delete a.retry_ch;
         }
-        await kvSetJSON(env, "alerts", fresh);
       }
+      await kvSetJSON(env, "alerts", fresh);
       const lc = await kvGetJSON(env, "last_cron", {});
       await kvSetJSON(env, "last_cron", { ...lc, n: { t: Date.now(), ok: failed.length === 0, e: notifyErr } });
     }
@@ -584,8 +579,33 @@ async function isLoggedIn(request, auth) {
 
 // Best-effort brute-force guard (per isolate): 5 wrong logins -> 10 minutes lock for that IP.
 const _fails = new Map();
-const lockedOut = (ip) => { const f = _fails.get(ip); return !!f && f.n >= 5 && Date.now() - f.t < 600000; };
-const noteFail = (ip) => { const f = _fails.get(ip); if (!f || Date.now() - f.t > 600000) _fails.set(ip, { n: 1, t: Date.now() }); else f.n++; };
+async function rateLimitKey(ip) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(ip || "unknown")));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function lockedOut(env, ip) {
+  const key = await rateLimitKey(ip), now = Date.now();
+  if (env.DB && await dbReady(env)) {
+    const row = await env.DB.prepare("SELECT n, window_start FROM rate_limits WHERE k = ?").bind(key).first();
+    return !!row && now - row.window_start < 600000 && row.n >= 5;
+  }
+  const f = _fails.get(key);
+  return !!f && f.n >= 5 && now - f.t < 600000;
+}
+async function noteFail(env, ip) {
+  const key = await rateLimitKey(ip), now = Date.now();
+  if (env.DB && await dbReady(env)) {
+    await env.DB.prepare("INSERT INTO rate_limits (k,n,window_start) VALUES (?,1,?) ON CONFLICT(k) DO UPDATE SET n=CASE WHEN ? - window_start >= 600000 THEN 1 ELSE n + 1 END, window_start=CASE WHEN ? - window_start >= 600000 THEN ? ELSE window_start END").bind(key, now, now, now, now).run();
+    return;
+  }
+  const f = _fails.get(key);
+  if (!f || now - f.t > 600000) _fails.set(key, { n: 1, t: now }); else f.n++;
+}
+async function clearFails(env, ip) {
+  const key = await rateLimitKey(ip);
+  _fails.delete(key);
+  if (env.DB && await dbReady(env)) await env.DB.prepare("DELETE FROM rate_limits WHERE k = ?").bind(key).run();
+}
 
 // Registration / password reset are confirmed with a one-time code e-mailed to the account address.
 async function sendCode(env, to, label, code, ov, en) {
@@ -787,12 +807,12 @@ async function handleApi(request, env, url) {
 
   if (M === "POST" && p === "/api/login") {
     if (!auth) return jsonRes({ error: "no account yet" }, 400);
-    if (lockedOut(ip)) return jsonRes({ error: "too many attempts" }, 429);
+    if (await lockedOut(env, ip)) return jsonRes({ error: "too many attempts" }, 429);
     const b = await body();
     const hash = await pbkdf2(String(b.password || ""), auth.salt); // always computed, so timing doesn't reveal the email
     const ok = String(b.email || "").trim().toLowerCase() === auth.user && safeEqual(hash, auth.hash);
-    if (!ok) { noteFail(ip); await new Promise((r) => setTimeout(r, 800)); return jsonRes({ error: "wrong password" }, 401); }
-    _fails.delete(ip);
+    if (!ok) { await noteFail(env, ip); await new Promise((r) => setTimeout(r, 800)); return jsonRes({ error: "wrong password" }, 401); }
+    await clearFails(env, ip);
     return jsonRes({ ok: true }, 200, sess(await makeSession(auth)));
   }
   // Step 1 of register / forgot-password: validate, hash the password, e-mail a one-time code.
