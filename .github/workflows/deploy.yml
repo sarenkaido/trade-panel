@@ -34,12 +34,9 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           if [ "$GITHUB_REF" = "refs/heads/chatgpt" ]; then
-            npx --yes wrangler@4 kv namespace list --json > /tmp/kv-list.json
-            KV_ID=$(node -e 'const a=require("/tmp/kv-list.json");const x=a.find(v=>v.title==="alert-chatgpt-preview");if(x)process.stdout.write(x.id)')
-            if [ -z "$KV_ID" ]; then
-              npx --yes wrangler@4 kv namespace create "alert-chatgpt-preview" --json > /tmp/kv-created.json
-              KV_ID=$(node -e 'const a=require("/tmp/kv-created.json");process.stdout.write(a.id)')
-            fi
+            npx --yes wrangler@4 kv namespace create "alert-chatgpt-preview-${GITHUB_SHA:0:8}" > /tmp/kv-created.txt 2>&1
+            cat /tmp/kv-created.txt
+            KV_ID=$(grep -Eo '[0-9a-f]{32}' /tmp/kv-created.txt | tail -n 1)
           fi
           if [ -z "$KV_ID" ]; then echo "::error::KV namespace id is missing"; exit 1; fi
           sed -i "s/PUT_YOUR_KV_NAMESPACE_ID_HERE/$KV_ID/" wrangler.toml
