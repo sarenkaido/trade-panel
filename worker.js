@@ -156,13 +156,31 @@ async function getPerp(b) {
 }
 
 // Spot prices fall through a list of exchanges (some block Workers IPs). The last working one is tried first.
+const _exchangeHealth = new Map();
 async function tryPrice(url, pick, ms) {
+  const host = (() => { try { return new URL(url).hostname; } catch (e) { return "unknown"; } })();
+  const started = Date.now();
   try {
     const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(ms || PRICE_FETCH_TIMEOUT_MS) });
-    if (!res.ok) return null;
-    const v = parseFloat(pick(await res.json()));
-    return isFinite(v) && v > 0 ? v : null;
-  } catch (e) { return null; }
+    if (!res.ok) {
+      _exchangeHealth.set(host, { ok: false, status: res.status, at: Date.now(), ms: Date.now() - started });
+      console.log("[exchange] " + host + " HTTP " + res.status);
+      return null;
+    }
+    const value = parseFloat(pick(await res.json()));
+    if (!Number.isFinite(value) || value <= 0) {
+      _exchangeHealth.set(host, { ok: false, status: "invalid-payload", at: Date.now(), ms: Date.now() - started });
+      console.log("[exchange] " + host + " invalid price payload");
+      return null;
+    }
+    _exchangeHealth.set(host, { ok: true, status: 200, at: Date.now(), ms: Date.now() - started });
+    return value;
+  } catch (e) {
+    const reason = e && e.name === "TimeoutError" ? "timeout" : String(e && e.message || e).slice(0, 100);
+    _exchangeHealth.set(host, { ok: false, status: reason, at: Date.now(), ms: Date.now() - started });
+    console.log("[exchange] " + host + " " + reason);
+    return null;
+  }
 }
 const SPOT_SOURCES = [
   (c) => ["https://www.okx.com/api/v5/market/ticker?instId=" + c + "-USDT", (d) => d?.data?.[0]?.last],
@@ -271,18 +289,19 @@ async function checkPricesOnce(env) {
   _lastInfo = { pending: pending.length, missing: [] };
   if (pending.length === 0) return [];
 
+  const coinsP = [...new Set(pending.map((a) => a.coin))].slice(0, 7);
   const priceMap = {};
-  await Promise.all([...new Set(pending.map((a) => a.coin))].map(async (coin) => { priceMap[coin] = await getPrice(coin); }));
+  await Promise.all(coinsP.map(async (coin) => { priceMap[coin] = await getPrice(coin); }));
 
-  // Wick detection costs one extra request per coin, so it is skipped when there are many coins (free plan: 50 subrequests per run).
+  // Worst-case fallback: 7 venues × 5 symbols + up to 3 candle sources × 5 = 50 requests.
   const rangeMap = {};
-  const coinsP = [...new Set(pending.map((a) => a.coin))];
   if (coinsP.length <= 5) await Promise.all(coinsP.map(async (coin) => { const created = pending.filter((a) => a.coin === coin && a.created_at).map((a) => a.created_at).sort()[0]; rangeMap[coin] = await getRange(coin, created); }));
 
   const newMsgs = [];
   const updates = {};
 
   for (const a of pending) {
+    if (!Object.prototype.hasOwnProperty.call(priceMap, a.coin)) continue;
     const price = priceMap[a.coin];
     if (price === null || price === undefined) {
       console.log(`[price] no price for ${a.coin}`);
