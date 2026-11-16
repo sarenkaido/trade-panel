@@ -1525,6 +1525,121 @@ html[dir=ltr] .mr b{padding-left:0;padding-right:12px}
 html[dir=ltr] .mr b:before{left:auto;right:0}
 html[dir=ltr] .tb button.on{box-shadow:inset 0 -2px 0 var(--acc)}
 @media(min-width:920px){html[dir=ltr] .tb button.on{box-shadow:inset 3px 0 0 var(--acc)}}
+
+/* ===== New Trading Desk UI ===== */
+:root{
+ --bg:#090e13;--card:#111a22;--card2:#16232d;--line:#24343f;--line2:#344b58;
+ --tx:#edf4f7;--tx2:#c0d0d8;--mut:#8095a2;--acc:#55dbc0;--acc2:#12a98d;--onacc:#041510;
+ --long:#39d6a5;--short:#ff7187;--amb:#f3bd62;--cyan:#69cce7;
+ --longS:#39d6a51a;--shortS:#ff71871a;--ambS:#f3bd621a;--accS:#55dbc01c;--cyanS:#69cce71a;
+ --chip:#ffffff08;--sheet:#111a22;--sheetline:#344b58;--ring:#55dbc044;
+ --shadow:0 24px 70px -32px #000c;--shadowS:0 8px 28px -18px #0009;
+ --grid:#ffffff04;--gridM:#ffffff07;--r:15px;--rS:11px;
+}
+html[data-theme=light]{
+ --bg:#edf2f4;--card:#fff;--card2:#f4f8f9;--line:#dce5e8;--line2:#c7d5da;
+ --tx:#14232b;--tx2:#3d5661;--mut:#718792;--acc:#087f70;--acc2:#087f70;--onacc:#fff;
+ --long:#07845e;--short:#cf405a;--amb:#a66b12;--cyan:#087c98;
+ --longS:#07845e15;--shortS:#cf405a14;--ambS:#a66b1214;--accS:#087f7012;--cyanS:#087c9812;
+ --chip:#14232b08;--sheet:#fff;--sheetline:#dce5e8;--ring:#087f7029;
+ --shadow:0 24px 70px -34px #253c4840;--shadowS:0 8px 28px -18px #253c4825;
+ --grid:#14232b05;--gridM:#14232b08;
+}
+body{background:var(--bg);font-size:14px;line-height:1.75;padding-bottom:92px}
+.bgfx{opacity:.55;background-size:160px 160px,160px 160px,32px 32px,32px 32px}
+.w{max-width:1500px;padding:0 28px}
+.top{gap:14px;padding:15px 28px;margin:0 -28px 8px;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(18px);border-bottom-color:var(--line)}
+.lg>i{width:42px;height:42px;border-radius:13px;background:linear-gradient(145deg,#2ac7a8,#087d70);box-shadow:0 8px 24px #12a98d30}
+.top h1{font-size:17px;letter-spacing:.1px}
+.top .st{color:var(--mut)}
+.ib{width:40px;height:40px;border-radius:11px;background:var(--card);box-shadow:var(--shadowS)}
+.ib:hover{background:var(--accS);border-color:var(--acc);color:var(--acc)}
+.workspace-head{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:20px 0 18px;padding:21px 24px;border:1px solid var(--line);border-radius:18px;background:radial-gradient(ellipse at 0% 0%,var(--accS),transparent 55%),var(--card);box-shadow:var(--shadowS)}
+.workspace-head .eyebrow{font:700 10px var(--mono);letter-spacing:1.8px;color:var(--acc);direction:ltr;text-align:right}
+.workspace-head h2{font-size:22px;line-height:1.5;font-weight:800;letter-spacing:-.4px;margin:3px 0}
+.workspace-head p{font-size:12.5px;color:var(--mut);margin:0}
+.workspace-mark{display:flex;align-items:center;gap:9px;padding:9px 13px;border:1px solid var(--line);border-radius:12px;background:var(--card2);font-size:11px;color:var(--tx2);white-space:nowrap}
+.workspace-mark i{width:8px;height:8px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 4px var(--accS)}
+.side{gap:16px}
+.tb{border:1px solid var(--line);border-radius:16px;background:var(--card);padding:8px;box-shadow:var(--shadowS)}
+.tb:before{content:"WORKSPACE";display:block;padding:9px 12px 7px;font:700 9px var(--mono);letter-spacing:1.7px;color:var(--mut);direction:ltr;text-align:right}
+.tb button{min-height:46px;border:0!important;border-radius:10px!important;padding:9px 12px!important;margin:2px 0;font-size:13px;transition:background .18s,color .18s}
+.tb button svg{width:18px;height:18px}
+.tb button.on{background:var(--accS)!important;color:var(--acc)!important;box-shadow:none!important}
+.tb button.on svg{color:var(--acc)}
+.tb button:not(.on):hover{background:var(--chip);color:var(--tx)}
+.mk{border:1px solid var(--line);border-radius:16px;background:var(--card);padding:14px;box-shadow:var(--shadowS)}
+.mk h3{font-size:10px;letter-spacing:1.2px;font-family:var(--mono);direction:ltr;text-align:right}
+.mr{border-top:1px solid var(--line);border-radius:0;background:transparent;padding:10px 2px;font-size:11px}
+.mr b{color:var(--acc)}
+main{min-width:0;padding-bottom:24px}
+main>section:not([hidden]){animation:tabin .2s ease-out}
+.fbar{padding:13px;background:var(--card);border-radius:15px;margin:0 0 16px;box-shadow:var(--shadowS);gap:11px}
+.fbar .srch{background:var(--bg);border-radius:10px;min-height:44px}
+.fcl{border-radius:10px;background:var(--bg)}
+.fc{border-radius:9px;min-height:35px}
+.seg{border-radius:10px;background:var(--bg);padding:3px}
+.seg button{border-radius:8px;min-height:34px}
+.seg button.on{background:var(--accS);color:var(--acc)}
+.card{border-radius:15px;margin-bottom:0;box-shadow:var(--shadowS);background:linear-gradient(155deg,color-mix(in srgb,var(--card) 97%,white 3%),var(--card))}
+.card:hover{border-color:var(--line2);transform:translateY(-1px);box-shadow:var(--shadow)}
+.hd{padding:14px 15px;gap:11px}
+.av{width:39px;height:39px;border-radius:11px;background:var(--card2)}
+.coin{font-size:15px}
+.pxw .px{font-size:17px}
+.trk{margin:15px 18px 8px}
+.row{padding:10px 16px;min-height:45px}
+.msg{border:1px dashed var(--line2);border-radius:15px;background:var(--card);padding:56px 16px}
+.fab{border-radius:13px;background:linear-gradient(135deg,#26c8a7,#078a77);box-shadow:0 12px 28px #087f7045;font-size:14px;padding:14px 22px}
+.fab:hover{filter:brightness(1.08);box-shadow:0 16px 34px #087f704f}
+.pn{border-radius:20px;border-color:var(--line2);background:var(--sheet);box-shadow:0 28px 90px #0009}
+.pnh{font-size:17px;margin-bottom:10px}
+.go{border-radius:11px;background:linear-gradient(135deg,#26c8a7,#078a77);color:#041510}
+.lk{border-radius:8px}
+.rd,.fs{border-radius:15px;box-shadow:var(--shadowS)}
+.rdh{padding:19px 18px 14px}
+.rdv{font-size:36px;color:var(--acc)}
+.stt{padding:13px}
+.stt b{font-size:13px}
+.bd{border-radius:11px}
+.sh{backdrop-filter:blur(7px)}
+#selbar{border-radius:14px}
+#selbar .lk{border-radius:8px}
+@media(min-width:920px){
+ body{padding-bottom:38px}
+ .w{grid-template-columns:248px minmax(0,1fr);column-gap:28px;padding:0 28px}
+ .top{margin:0 -28px 8px;padding:15px 28px}
+ .side{top:92px;margin-top:18px}
+ .tb{padding:8px}
+ .tb button{justify-content:flex-start;min-height:46px;padding:9px 12px}
+ .mk{display:block;padding:14px}
+ .mr{width:100%;justify-content:space-between}
+ #p-a,#p-s,#p-w,#p-p,#p-g,#p-k,#p-c{margin-top:18px}
+ #list,#slist,#wlist,#plist,#glist,#klist{grid-template-columns:repeat(auto-fill,minmax(390px,1fr));gap:14px}
+ .fab{bottom:28px}
+}
+@media(max-width:919px){
+ body{padding-bottom:calc(158px + env(safe-area-inset-bottom))}
+ .w{padding:0 16px}
+ .top{margin:0 -16px;padding:calc(10px + env(safe-area-inset-top)) 16px 10px}
+ .side{display:contents}
+ .tb{border:0;border-radius:0;padding:0 6px env(safe-area-inset-bottom);box-shadow:0 -8px 28px -18px #0008}
+ .tb:before{display:none}
+ .tb button{margin:0;min-height:60px;border-radius:0!important}
+ .tb button.on{box-shadow:inset 0 2px 0 var(--acc)!important;background:transparent!important}
+ .workspace-head{margin:14px 0;padding:16px;border-radius:15px}
+ .workspace-head h2{font-size:18px}
+ .workspace-mark{padding:8px 10px;font-size:10px}
+ .fab{bottom:calc(74px + env(safe-area-inset-bottom))}
+ .#selbar{bottom:calc(76px + env(safe-area-inset-bottom))}
+}
+@media(max-width:520px){
+ .workspace-head{align-items:flex-start;flex-direction:column;gap:10px}
+ .workspace-mark{align-self:flex-start}
+ .top h1{font-size:15px}
+}
+@media(prefers-reduced-motion:reduce){.card{transform:none!important}}
+
 </style></head><body>
 <div class="bgfx" aria-hidden="true"></div>
 <div class="w">
@@ -1547,6 +1662,7 @@ html[dir=ltr] .tb button.on{box-shadow:inset 0 -2px 0 var(--acc)}
 <div class="mk" id="mk"></div>
 </div>
 <main>
+<div class="workspace-head"><div><div class="eyebrow">PERSONAL TRADING WORKSPACE</div><h2>مرکز مدیریت معاملات</h2><p>آلارم‌ها، سناریوها و ابزارهای معاملاتی در یک فضای یکپارچه</p></div><div class="workspace-mark"><i></i><span>فضای کاری شخصی</span></div></div>
 <section id="p-a">
 <div class="fbar">
 <div class="frow"><input class="srch" id="fq" placeholder="🔍 جستجوی کوین…" autocomplete="off"><button class="fcl" id="selbtn" title="انتخاب چند آلارم">☑</button><button class="fcl" id="fclr" title="پاک کردن فیلترها">✕</button></div>
