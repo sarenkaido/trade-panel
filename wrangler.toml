@@ -1,9 +1,11 @@
 # تنظیمات دیپلوی. فقط `id` پایین را با شناسه‌ی KV خودت عوض کن (راهنما در README).
-name = "alert-chatgpt-preview"
+name = "alert"
 main = "worker.js"
 compatibility_date = "2026-01-01"
 
-# Cron is disabled in the preview environment to avoid duplicate background checks.
+# هر دقیقه قیمت‌ها چک می‌شود
+[triggers]
+crons = ["* * * * *"]
 
 # KV (آلارم‌ها و حساب کاربری اینجا ذخیره می‌شوند)
 [[kv_namespaces]]
