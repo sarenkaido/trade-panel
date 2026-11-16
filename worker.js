@@ -425,7 +425,7 @@ async function runScheduledCheck(env) {
       if (note) { md.push(">" + esc("📝 " + note)); plain.push("📝 " + note); }
       md.push(LINE, "*" + esc(head) + "*", ...rows.map(([k, v]) => esc(k) + code(v)));
       plain.push(LINE, head, ...rows.map(([k, v]) => k + v));
-      return { md: md.join("\n"), plain: plain.join("\n"), ch: a.ch || ["tg"], subject: head + " — " + who, aid: a.id, tid: t.id || 0 };
+      return { md: md.join("\n"), plain: plain.join("\n"), ch: a.retry_ch || a.ch || ["tg"], subject: head + " — " + who, aid: a.id, tid: t.id || 0 };
     });
     const tgBlocks = blocks.filter((x) => x.ch.includes("tg")), emBlocks = blocks.filter((x) => x.ch.includes("email"));
     // If Telegram rejects the formatting, resend as plain text so an alert is never lost.
@@ -470,11 +470,19 @@ async function runScheduledCheck(env) {
           const tids = failed.filter((f) => f.aid === a.id).map((f) => f.tid);
           if (tids.length) {
             a.triggered = (a.triggered || []).filter((x) => !tids.includes(x));
-            // Clear the cooldown too; otherwise the next cron tick re-marks the
-            // target as triggered without queuing a message, losing the alert.
-            if (a.last_triggered) {
-              for (const tid of tids) delete a.last_triggered[String(tid)];
+            if (a.last_triggered) for (const tid of tids) delete a.last_triggered[String(tid)];
+            for (const tid of tids) {
+              const target = a.targets.find((x) => (x.id || 0) === tid);
+              const channels = target ? (a.retry_ch || a.ch || ["tg"]) : ["tg"];
+              a.retry_ch = [...new Set([...(channels || []), "tg"])];
             }
+          }
+        }
+        for (const a of fresh.alerts || []) {
+          const sentIds = tgBlocks.filter((f) => f.aid === a.id && !failed.some((x) => x.aid === f.aid && x.tid === f.tid)).map((f) => f.tid);
+          for (const tid of sentIds) {
+            if (a.retry_ch) a.retry_ch = a.retry_ch.filter((ch) => ch !== "tg");
+            if (a.retry_ch && !a.retry_ch.length) delete a.retry_ch;
           }
         }
         await kvSetJSON(env, "alerts", fresh);
@@ -486,7 +494,25 @@ async function runScheduledCheck(env) {
       const sett = await kvGetJSON(env, "settings", {});
       if (sett.verified && sett.email) {
         const r = await sendEmail(env, sett.email, emBlocks.length === 1 ? emBlocks[0].subject : Lb("🔔 " + emBlocks.length + " هشدار قیمت", "🔔 " + emBlocks.length + " price alerts"), emBlocks.map((x) => x.plain).join(SEP));
-        if (!r.ok) console.log("[email] " + r.error);
+        if (!r.ok) {
+          console.log("[email] " + r.error);
+          const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+          for (const a of fresh.alerts || []) {
+            const tids = emBlocks.filter((x) => x.aid === a.id).map((x) => x.tid);
+            if (!tids.length) continue;
+            a.retry_ch = [...new Set([...(a.retry_ch || []), "email"])];
+            a.triggered = (a.triggered || []).filter((id) => !tids.includes(id));
+            if (a.last_triggered) for (const tid of tids) delete a.last_triggered[String(tid)];
+          }
+          await kvSetJSON(env, "alerts", fresh);
+        } else {
+          const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+          for (const a of fresh.alerts || []) if (emBlocks.some((x) => x.aid === a.id)) {
+            if (a.retry_ch) a.retry_ch = a.retry_ch.filter((ch) => ch !== "email");
+            if (a.retry_ch && !a.retry_ch.length) delete a.retry_ch;
+          }
+          await kvSetJSON(env, "alerts", fresh);
+        }
       }
     }
   } catch (e) {
