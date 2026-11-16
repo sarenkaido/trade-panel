@@ -1631,7 +1631,7 @@ main>section:not([hidden]){animation:tabin .2s ease-out}
  .workspace-head h2{font-size:18px}
  .workspace-mark{padding:8px 10px;font-size:10px}
  .fab{bottom:calc(74px + env(safe-area-inset-bottom))}
- .#selbar{bottom:calc(76px + env(safe-area-inset-bottom))}
+ #selbar{bottom:calc(76px + env(safe-area-inset-bottom))}
 }
 @media(max-width:520px){
  .workspace-head{align-items:flex-start;flex-direction:column;gap:10px}
