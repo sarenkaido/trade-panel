@@ -27,21 +27,13 @@ jobs:
         run: |
           cp worker.js /tmp/check.mjs
           node --check /tmp/check.mjs
-      - name: Insert KV id
+      - name: Insert production KV id
         env:
           KV_ID: ${{ secrets.KV_NAMESPACE_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          if [ "$GITHUB_REF" = "refs/heads/chatgpt" ]; then
-            npx --yes wrangler@4 kv namespace create "alert-chatgpt-preview-${GITHUB_SHA:0:8}" > /tmp/kv-created.txt 2>&1
-            cat /tmp/kv-created.txt
-            KV_ID=$(grep -Eo '[0-9a-f]{32}' /tmp/kv-created.txt | tail -n 1)
-          fi
-          if [ -z "$KV_ID" ]; then echo "::error::KV namespace id is missing"; exit 1; fi
+          if [ -z "$KV_ID" ]; then echo "::error::Secret KV_NAMESPACE_ID is missing"; exit 1; fi
           sed -i "s/PUT_YOUR_KV_NAMESPACE_ID_HERE/$KV_ID/" wrangler.toml
       - name: Attach D1 database (optional)
-        if: github.ref != 'refs/heads/chatgpt'
         env:
           D1_ID: ${{ secrets.D1_DATABASE_ID }}
         run: |
@@ -57,3 +49,11 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
+      - name: Remove temporary preview Worker and KV
+        if: github.ref == 'refs/heads/chatgpt'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          echo "y" | npx wrangler delete --name alert-chatgpt-preview
+          echo "y" | npx wrangler kv namespace delete --namespace-id 761ecf461c214e59a0f4ab29ee3216cc
