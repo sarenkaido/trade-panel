@@ -1,0 +1,19 @@
+name: Check chatgpt branch
+on:
+  push:
+    branches: ["chatgpt"]
+    paths: ["worker.js", ".github/workflows/check-chatgpt.yml"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JavaScript syntax check
+        run: |
+          cp worker.js /tmp/check.mjs
+          node --check /tmp/check.mjs
