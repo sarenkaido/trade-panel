@@ -51,6 +51,7 @@ jobs:
           command: deploy
       - name: Remove temporary preview Worker and KV
         if: github.ref == 'refs/heads/chatgpt'
+        continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
