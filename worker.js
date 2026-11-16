@@ -451,17 +451,10 @@ async function runScheduledCheck(env) {
     });
     const tgBlocks = blocks.filter((x) => x.ch.includes("tg")), emBlocks = blocks.filter((x) => x.ch.includes("email"));
     // If Telegram rejects the formatting, resend as plain text so an alert is never lost.
-    const send = async (md, plain) => {
-      let ok = true, err = "";
-      for (const chat of chats) {
-        let r = await apiCall(env, "sendMessage", { chat_id: chat, text: md, parse_mode: "MarkdownV2" }, tok);
-        if (!r.ok) r = await apiCall(env, "sendMessage", { chat_id: chat, text: plain }, tok);
-        if (!r.ok) {
-          ok = false;
-          err = String(r.description || r.error || "unknown").slice(0, 80);
-        }
-      }
-      return { ok, err };
+    const send = async (chat, md, plain) => {
+      let r = await apiCall(env, "sendMessage", { chat_id: chat, text: md, parse_mode: "MarkdownV2" }, tok);
+      if (!r.ok) r = await apiCall(env, "sendMessage", { chat_id: chat, text: plain }, tok);
+      return r;
     };
     // Free plan allows 50 subrequests per run, so bursts are combined into a few messages.
     // A group whose Telegram message could not be delivered is NOT marked as triggered: it is retried on a later tick.
@@ -469,8 +462,41 @@ async function runScheduledCheck(env) {
     const failed = [];
     let notifyErr = "";
     const sendGroup = async (grp) => {
-      const r = await send(grp.map((x) => x.md).join(SEP), grp.map((x) => x.plain).join(SEP));
-      if (!r.ok) { notifyErr = r.err || notifyErr; failed.push(...grp); }
+      for (const bl of grp) {
+        const key = String(bl.tid || 0);
+        const current = await kvGetJSON(env, "alerts", { alerts: [] });
+        const alert = (current.alerts || []).find((x) => x.id === bl.aid);
+        const already = alert && alert.tg_sent && alert.tg_sent[key] || [];
+        let blockFailed = false;
+        for (const chat of chats) {
+          if (already.includes(String(chat))) continue;
+          const r = await send(chat, bl.md, bl.plain);
+          if (r.ok) {
+            const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+            const target = (fresh.alerts || []).find((x) => x.id === bl.aid);
+            if (target) {
+              if (!target.tg_sent) target.tg_sent = {};
+              const sent = target.tg_sent[key] || [];
+              if (!sent.includes(String(chat))) sent.push(String(chat));
+              target.tg_sent[key] = sent;
+              await kvSetJSON(env, "alerts", fresh);
+            }
+          } else {
+            blockFailed = true;
+            notifyErr = String(r.description || r.error || "unknown").slice(0, 80);
+          }
+        }
+        if (blockFailed || !chats.length) failed.push(bl);
+        else {
+          const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+          const target = (fresh.alerts || []).find((x) => x.id === bl.aid);
+          if (target && target.tg_sent) {
+            delete target.tg_sent[key];
+            if (!Object.keys(target.tg_sent).length) delete target.tg_sent;
+            await kvSetJSON(env, "alerts", fresh);
+          }
+        }
+      }
     };
     if (!chats.length) {
       console.log("[notify] no Telegram bot connected");
