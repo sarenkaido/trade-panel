@@ -231,7 +231,10 @@ function parseNote(note) {
 
 
 // High/low of the last few 1-minute candles: a wick that touched a target between two cron ticks still fires the alert.
-async function getRange(coin) {
+async function getRange(coin, createdAt) {
+  const since = Date.parse(createdAt || "");
+  // Do not let a candle that opened before the alert was created trigger it.
+  if (!Number.isFinite(since)) return null;
   const c = (splitCoin(coin) || { base: coin.toUpperCase() }).base;
   const srcs = [
     [`https://api.bybit.com/v5/market/kline?category=linear&symbol=${c}USDT&interval=1&limit=3`, (d) => d?.result?.list],
@@ -241,11 +244,14 @@ async function getRange(coin) {
   for (const [url, pick] of srcs) {
     try {
       const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(2500) });
+      if (!res.ok) continue;
       const rows = pick(await res.json());
       if (!Array.isArray(rows) || !rows.length) continue;
-      const hi = Math.max(...rows.map((r) => parseFloat(r[2]))), lo = Math.min(...rows.map((r) => parseFloat(r[3])));
-      if (isFinite(hi) && isFinite(lo) && hi > 0) return { hi, lo };
-    } catch (e) { /* try next */ }
+      const fresh = rows.filter((r) => Number(r[0]) >= since);
+      if (!fresh.length) continue;
+      const hi = Math.max(...fresh.map((r) => parseFloat(r[2]))), lo = Math.min(...fresh.map((r) => parseFloat(r[3])));
+      if (Number.isFinite(hi) && Number.isFinite(lo) && hi > 0) return { hi, lo };
+    } catch (e) { console.log("[wick] " + c + " source error: " + e); }
   }
   return null;
 }
@@ -268,7 +274,7 @@ async function checkPricesOnce(env) {
   // Wick detection costs one extra request per coin, so it is skipped when there are many coins (free plan: 50 subrequests per run).
   const rangeMap = {};
   const coinsP = [...new Set(pending.map((a) => a.coin))];
-  if (coinsP.length <= 15) await Promise.all(coinsP.map(async (coin) => { rangeMap[coin] = await getRange(coin); }));
+  if (coinsP.length <= 5) await Promise.all(coinsP.map(async (coin) => { const created = pending.filter((a) => a.coin === coin && a.created_at).map((a) => a.created_at).sort()[0]; rangeMap[coin] = await getRange(coin, created); }));
 
   const newMsgs = [];
   const updates = {};
@@ -973,7 +979,7 @@ async function handleApi(request, env, url) {
     if (cat) { const cs = await kvGetJSON(env, "cats", []); if (!Array.isArray(cs) || !cs.some((c) => c.id === cat)) cat = 0; }
     const data = await kvGetJSON(env, "alerts", { alerts: [], last_id: 0 });
     const aid = (data.last_id || 0) + 1;
-    data.alerts.push({ id: aid, coin, targets: built, triggered: [], prev_price: null, entry_price: hasEntry ? entryIn : null, ref_price: refPrice, ch, cat });
+    data.alerts.push({ id: aid, coin, targets: built, triggered: [], created_at: new Date().toISOString(), prev_price: null, entry_price: hasEntry ? entryIn : null, ref_price: refPrice, ch, cat });
     data.last_id = aid;
     await kvSetJSON(env, "alerts", data);
     return jsonRes({ ok: true, id: aid });
@@ -1088,10 +1094,7 @@ async function handleApi(request, env, url) {
     await kvSetJSON(env, "alerts", data);
     return jsonRes({ ok: true });
   }
-  if (M === "POST" && p === "/api/sync") {
-    const msgs = await checkPricesOnce(env);
-    return jsonRes({ ok: true, n: msgs.length });
-  }
+  if (M === "POST" && p === "/api/sync") return jsonRes({ error: "deprecated; use /api/check-now" }, 410);
   const mt = p.match(/^\/api\/alerts\/(\d+)\/tick$/);
   if (mt && M === "POST") {
     const id = parseInt(mt[1], 10), tid = parseInt((await body()).tid, 10);
