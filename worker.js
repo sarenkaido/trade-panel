@@ -534,6 +534,18 @@ async function runScheduledCheck(env) {
           }
           await kvSetJSON(env, "alerts", fresh);
         }
+      } else {
+        const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+        for (const a of fresh.alerts || []) {
+          const tids = emBlocks.filter((x) => x.aid === a.id).map((x) => x.tid);
+          if (!tids.length) continue;
+          a.retry_ch = a.retry_ch || {};
+          for (const tid of tids) a.retry_ch[String(tid)] = [...new Set([...(a.retry_ch[String(tid)] || []), "email"])];
+          a.triggered = (a.triggered || []).filter((id) => !tids.includes(id));
+          if (a.last_triggered) for (const tid of tids) delete a.last_triggered[String(tid)];
+        }
+        await kvSetJSON(env, "alerts", fresh);
+        console.log("[email] no verified recipient; email alerts will retry");
       }
     }
   } catch (e) {
