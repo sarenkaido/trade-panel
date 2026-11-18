@@ -1399,7 +1399,7 @@ body.selmode .card{cursor:pointer}
 @media (max-width:520px){.tb.many button{flex:0 0 auto;min-width:66px;padding:6px 8px}}
 .uh{display:flex;align-items:center;gap:8px;margin:2px 0 10px}.uh b{font-size:16px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .uem{font-size:22px;line-height:1}.ust{font-size:11.5px;color:var(--mut)}
-.uta{display:block;width:100%;min-height:60vh;resize:none;overflow:hidden;padding:4px 2px 80px;border:0;border-radius:0;background:transparent;color:var(--tx);font:inherit;font-size:15px;line-height:2;outline:0;box-shadow:none}
+.uta{display:block;width:100%;min-height:60vh;resize:none;overflow:hidden;padding:14px 16px;margin-bottom:24px;border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--tx);font:inherit;font-size:15px;line-height:2;outline:0;box-shadow:none}
 .uem-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.uem-row button{width:42px;height:42px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-size:20px;cursor:pointer}
 .uem-row button.on{border-color:var(--acc);box-shadow:0 0 0 2px color-mix(in srgb,var(--acc) 30%,transparent)}
 .sst{margin:6px 0 10px}
@@ -2355,7 +2355,7 @@ function paintU(){const bar=document.querySelector('.tb'),add=$('#tbadd');bar.qu
  utabs.forEach(x=>{const b=document.createElement('button');b.dataset.t='u_'+x.id;b.dataset.u='1';const e=document.createElement('span');e.className='em';e.textContent=x.icon;const l=document.createElement('span');l.textContent=x.title;b.append(e,l);b.onclick=()=>goTab(b.dataset.t);bar.insertBefore(b,add)});
  bar.classList.toggle('many',utabs.length>0);document.querySelectorAll('.tb button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab))}
 function goTab(t){show(t);try{history.pushState(null,'','#'+t)}catch(e){}try{localStorage.setItem('tab',t)}catch(e){}scrollTo(0,0)}
-function fitU(){const t=$('#u-t');t.style.height='auto';t.style.height=Math.max(t.scrollHeight,innerHeight*.6)+'px'}
+function fitU(){const t=$('#u-t');t.style.height='auto';t.style.height=Math.max(t.scrollHeight+t.offsetHeight-t.clientHeight,innerHeight*.6)+'px'}
 function openU(){const x=uget(tab);if(!x)return;uCur=x;$('#u-em').textContent=x.icon;$('#u-ti').textContent=x.title;$('#u-t').value=x.text||'';$('#u-st').textContent='';fitU();requestAnimationFrame(fitU)}
 async function saveU(){clearTimeout(uTimer);if(!uCur)return;const x=uCur,v=$('#u-t').value;if(v===(x.text||''))return;$('#u-st').textContent='در حال ذخیره…';
  try{await api('PUT','/api/tabs/'+x.id,{text:v});x.text=v;$('#u-st').textContent='ذخیره شد ✓'}catch(e){$('#u-st').textContent='⚠️ ذخیره نشد'}}
