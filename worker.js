@@ -419,21 +419,14 @@ async function runScheduledCheck(env) {
       if (note) { md.push(">" + esc("📝 " + note)); plain.push("📝 " + note); }
       md.push(LINE, "*" + esc(head) + "*", ...rows.map(([k, v]) => esc(k) + code(v)));
       plain.push(LINE, head, ...rows.map(([k, v]) => k + v));
-      return { md: md.join("\n"), plain: plain.join("\n"), ch: a.ch || ["tg"], subject: head + " — " + who, aid: a.id, tid: t.id || 0 };
+      return { md: md.join("\n"), plain: plain.join("\n"), ch: (a.retry_ch && a.retry_ch[String(t.id || 0)]) || a.ch || ["tg"], subject: head + " — " + who, aid: a.id, tid: t.id || 0 };
     });
     const tgBlocks = blocks.filter((x) => x.ch.includes("tg")), emBlocks = blocks.filter((x) => x.ch.includes("email"));
     // If Telegram rejects the formatting, resend as plain text so an alert is never lost.
-    const send = async (md, plain) => {
-      let ok = true, err = "";
-      for (const chat of chats) {
-        let r = await apiCall(env, "sendMessage", { chat_id: chat, text: md, parse_mode: "MarkdownV2" }, tok);
-        if (!r.ok) r = await apiCall(env, "sendMessage", { chat_id: chat, text: plain }, tok);
-        if (!r.ok) {
-          ok = false;
-          err = String(r.description || r.error || "unknown").slice(0, 80);
-        }
-      }
-      return { ok, err };
+    const send = async (chat, md, plain) => {
+      let r = await apiCall(env, "sendMessage", { chat_id: chat, text: md, parse_mode: "MarkdownV2" }, tok);
+      if (!r.ok) r = await apiCall(env, "sendMessage", { chat_id: chat, text: plain }, tok);
+      return r;
     };
     // Free plan allows 50 subrequests per run, so bursts are combined into a few messages.
     // A group whose Telegram message could not be delivered is NOT marked as triggered: it is retried on a later tick.
@@ -441,8 +434,44 @@ async function runScheduledCheck(env) {
     const failed = [];
     let notifyErr = "";
     const sendGroup = async (grp) => {
-      const r = await send(grp.map((x) => x.md).join(SEP), grp.map((x) => x.plain).join(SEP));
-      if (!r.ok) { notifyErr = r.err || notifyErr; failed.push(...grp); }
+      const md = grp.map((x) => x.md).join(SEP), plain = grp.map((x) => x.plain).join(SEP);
+      let groupFailed = false;
+      for (const chat of chats) {
+        const current = await kvGetJSON(env, "alerts", { alerts: [] });
+        const alreadySent = grp.every((bl) => {
+          const a = (current.alerts || []).find((x) => x.id === bl.aid);
+          return !!(a && a.tg_sent && (a.tg_sent[String(bl.tid || 0)] || []).includes(String(chat)));
+        });
+        if (alreadySent) continue;
+        const r = await send(chat, md, plain);
+        if (!r.ok) {
+          groupFailed = true;
+          notifyErr = String(r.description || r.error || "unknown").slice(0, 80);
+          continue;
+        }
+        const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+        for (const bl of grp) {
+          const a = (fresh.alerts || []).find((x) => x.id === bl.aid);
+          if (!a) continue;
+          if (!a.tg_sent) a.tg_sent = {};
+          const key = String(bl.tid || 0), sent = a.tg_sent[key] || [];
+          if (!sent.includes(String(chat))) sent.push(String(chat));
+          a.tg_sent[key] = sent;
+        }
+        await kvSetJSON(env, "alerts", fresh);
+      }
+      if (groupFailed) failed.push(...grp);
+      else {
+        const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+        for (const bl of grp) {
+          const a = (fresh.alerts || []).find((x) => x.id === bl.aid);
+          if (a && a.tg_sent) {
+            delete a.tg_sent[String(bl.tid || 0)];
+            if (!Object.keys(a.tg_sent).length) delete a.tg_sent;
+          }
+        }
+        await kvSetJSON(env, "alerts", fresh);
+      }
     };
     if (!chats.length) {
       console.log("[notify] no Telegram bot connected");
@@ -459,20 +488,26 @@ async function runScheduledCheck(env) {
     }
     if (tgBlocks.length) {
       const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
-      if (failed.length) {
-        for (const a of fresh.alerts || []) {
-          const tids = failed.filter((f) => f.aid === a.id).map((f) => f.tid);
-          if (tids.length) {
-            a.triggered = (a.triggered || []).filter((x) => !tids.includes(x));
-            // Clear the cooldown too; otherwise the next cron tick re-marks the
-            // target as triggered without queuing a message, losing the alert.
-            if (a.last_triggered) {
-              for (const tid of tids) delete a.last_triggered[String(tid)];
-            }
-          }
+      for (const a of fresh.alerts || []) {
+        const failedIds = [...new Set(failed.filter((f) => f.aid === a.id).map((f) => f.tid))];
+        if (failedIds.length) {
+          a.triggered = (a.triggered || []).filter((x) => !failedIds.includes(x));
+          if (a.last_triggered) for (const tid of failedIds) delete a.last_triggered[String(tid)];
+          a.retry_ch = a.retry_ch || {};
+          for (const tid of failedIds) a.retry_ch[String(tid)] = [...new Set([...(a.retry_ch[String(tid)] || []), "tg"])];
         }
-        await kvSetJSON(env, "alerts", fresh);
+        const sentIds = tgBlocks.filter((x) => x.aid === a.id && !failed.some((f) => f.aid === x.aid && f.tid === x.tid)).map((x) => x.tid);
+        for (const tid of sentIds) {
+          if (a.retry_ch && a.retry_ch[String(tid)]) {
+            a.retry_ch[String(tid)] = a.retry_ch[String(tid)].filter((ch) => ch !== "tg");
+            if (!a.retry_ch[String(tid)].length) delete a.retry_ch[String(tid)];
+          }
+          if (a.tg_sent) delete a.tg_sent[String(tid)];
+        }
+        if (a.retry_ch && !Object.keys(a.retry_ch).length) delete a.retry_ch;
+        if (a.tg_sent && !Object.keys(a.tg_sent).length) delete a.tg_sent;
       }
+      await kvSetJSON(env, "alerts", fresh);
       const lc = await kvGetJSON(env, "last_cron", {});
       await kvSetJSON(env, "last_cron", { ...lc, n: { t: Date.now(), ok: failed.length === 0, e: notifyErr } });
     }
@@ -480,7 +515,42 @@ async function runScheduledCheck(env) {
       const sett = await kvGetJSON(env, "settings", {});
       if (sett.verified && sett.email) {
         const r = await sendEmail(env, sett.email, emBlocks.length === 1 ? emBlocks[0].subject : Lb("🔔 " + emBlocks.length + " هشدار قیمت", "🔔 " + emBlocks.length + " price alerts"), emBlocks.map((x) => x.plain).join(SEP));
-        if (!r.ok) console.log("[email] " + r.error);
+        if (!r.ok) {
+          console.log("[email] " + r.error);
+          const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+          for (const a of fresh.alerts || []) {
+            const tids = emBlocks.filter((x) => x.aid === a.id).map((x) => x.tid);
+            if (!tids.length) continue;
+            a.retry_ch = a.retry_ch || {};
+            for (const tid of tids) a.retry_ch[String(tid)] = [...new Set([...(a.retry_ch[String(tid)] || []), "email"])];
+            a.triggered = (a.triggered || []).filter((id) => !tids.includes(id));
+            if (a.last_triggered) for (const tid of tids) delete a.last_triggered[String(tid)];
+          }
+          await kvSetJSON(env, "alerts", fresh);
+        } else {
+          const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+          for (const a of fresh.alerts || []) {
+            const tids = emBlocks.filter((x) => x.aid === a.id).map((x) => x.tid);
+            for (const tid of tids) if (a.retry_ch && a.retry_ch[String(tid)]) {
+              a.retry_ch[String(tid)] = a.retry_ch[String(tid)].filter((ch) => ch !== "email");
+              if (!a.retry_ch[String(tid)].length) delete a.retry_ch[String(tid)];
+            }
+            if (a.retry_ch && !Object.keys(a.retry_ch).length) delete a.retry_ch;
+          }
+          await kvSetJSON(env, "alerts", fresh);
+        }
+      } else {
+        const fresh = await kvGetJSON(env, "alerts", { alerts: [] });
+        for (const a of fresh.alerts || []) {
+          const tids = emBlocks.filter((x) => x.aid === a.id).map((x) => x.tid);
+          if (!tids.length) continue;
+          a.retry_ch = a.retry_ch || {};
+          for (const tid of tids) a.retry_ch[String(tid)] = [...new Set([...(a.retry_ch[String(tid)] || []), "email"])];
+          a.triggered = (a.triggered || []).filter((id) => !tids.includes(id));
+          if (a.last_triggered) for (const tid of tids) delete a.last_triggered[String(tid)];
+        }
+        await kvSetJSON(env, "alerts", fresh);
+        console.log("[email] no verified recipient; email alerts will retry");
       }
     }
   } catch (e) {
