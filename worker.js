@@ -1073,6 +1073,38 @@ async function handleApi(request, env, url) {
     }
     return jsonRes(out);
   }
+  // Custom tabs: the user adds their own tabs (name + emoji) and writes free text in them.
+  if (p === "/api/tabs" || p.startsWith("/api/tabs/")) {
+    const st = await kvGetJSON(env, "tabs", { tabs: [] });
+    const list = Array.isArray(st.tabs) ? st.tabs : [];
+    const id = p.slice("/api/tabs/".length);
+    const field = (v, n) => String(v).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").slice(0, n);
+    if (M === "GET" && p === "/api/tabs") return jsonRes({ tabs: list });
+    if (M === "POST" && p === "/api/tabs") {
+      const b = await body();
+      const title = field(b.title || "", 24).trim();
+      if (!title) return jsonRes({ error: "نام تب لازم است" }, 400);
+      if (list.length >= 10) return jsonRes({ error: "حداکثر ۱۰ تب دلخواه می‌شود ساخت" }, 400);
+      const t = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), title, icon: field(b.icon || "📝", 8) || "📝", text: "" };
+      list.push(t);
+      await kvSetJSON(env, "tabs", { tabs: list });
+      return jsonRes({ tab: t });
+    }
+    const t = list.find((x) => x.id === id);
+    if (!t) return jsonRes({ error: "not found" }, 404);
+    if (M === "PUT") {
+      const b = await body();
+      if (b.title !== undefined) { const v = field(b.title, 24).trim(); if (v) t.title = v; }
+      if (b.icon !== undefined) t.icon = field(b.icon, 8) || t.icon;
+      if (b.text !== undefined) t.text = field(b.text, 20000);
+      await kvSetJSON(env, "tabs", { tabs: list });
+      return jsonRes({ tab: t });
+    }
+    if (M === "DELETE") {
+      await kvSetJSON(env, "tabs", { tabs: list.filter((x) => x.id !== id) });
+      return jsonRes({ ok: true });
+    }
+  }
   if (M === "GET" && p === "/api/status") {
     const d = await kvGetJSON(env, "last_cron", {});
     return jsonRes({ t: d.t || 0, p: d.p || 0, m: d.m || "", e: d.e || "", n: d.n || null, now: Date.now(), s: env.DB ? "D1" : "KV" });
@@ -1245,6 +1277,14 @@ body.selmode .card{cursor:pointer}
 .wnote{padding:10px 15px 12px;font-size:13px;color:var(--tx2);border-top:1px solid var(--line);white-space:pre-wrap;word-break:break-word;line-height:1.9}
 .stext{padding:11px 15px 13px;font-size:13.5px;line-height:2;color:var(--tx2);white-space:pre-wrap;word-break:break-word;
   border-top:1px solid var(--line);max-height:320px;overflow:auto}
+.tbadd{opacity:.8}.tb .em{font-size:17px;line-height:1;flex:none}
+@media (max-width:520px){.tb.many button{flex:0 0 auto;min-width:66px;padding:6px 8px}}
+.uh{display:flex;align-items:center;gap:8px;margin:2px 0 10px}.uh b{font-size:16px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.uem{font-size:22px;line-height:1}.ust{font-size:11.5px;color:var(--mut)}
+.uta{width:100%;min-height:52vh;resize:vertical;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-size:14.5px;line-height:1.9;outline:0}
+.uta:focus{border-color:var(--acc)}
+.uem-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.uem-row button{width:42px;height:42px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-size:20px;cursor:pointer}
+.uem-row button.on{border-color:var(--acc);box-shadow:0 0 0 2px color-mix(in srgb,var(--acc) 30%,transparent)}
 .sst{margin:6px 0 10px}
 .stn{font-size:12.5px;color:var(--mut);line-height:1.9;margin:4px 0 6px}.stn div{padding:3px 0;border-top:1px solid var(--line)}.stn .bad{color:var(--short)}.stn .ok{color:var(--long)}
 .sp{display:none}.sp.on{display:block}
@@ -1543,6 +1583,7 @@ html[dir=ltr] .tb button.on{box-shadow:inset 0 -2px 0 var(--acc)}
 <button data-t="k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>ترید تسک</span></button>
 <button data-t="w"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg><span>واچ‌ لیست</span></button>
 <button data-t="c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg><span>ماشین‌ حساب</span></button>
+<button id="tbadd" class="tbadd" aria-label="افزودن تب"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span>تب جدید</span></button>
 </nav>
 <div class="mk" id="mk"></div>
 </div>
@@ -1578,6 +1619,10 @@ html[dir=ltr] .tb button.on{box-shadow:inset 0 -2px 0 var(--acc)}
 <div class="fchips" id="gchips"></div>
 </div>
 <div id="glist"><div class="msg">در حال بارگذاری…</div></div>
+</section>
+<section id="p-u" hidden>
+<div class="uh"><span class="uem" id="u-em">📝</span><b id="u-ti"></b><span class="ust" id="u-st"></span><button class="ib" id="u-ed" aria-label="ویرایش تب">✎</button></div>
+<textarea id="u-t" class="uta" maxlength="20000" placeholder="هر چیزی دوست داری اینجا بنویس…"></textarea>
 </section>
 <section id="p-k" hidden>
 <div class="fbar">
@@ -1673,6 +1718,15 @@ html[dir=ltr] .tb button.on{box-shadow:inset 0 -2px 0 var(--acc)}
 <button class="go" id="wgo">ذخیره</button><button class="lk" id="fwlx" style="width:100%;color:var(--mut)">انصراف</button>
 </div></div>
 <div id="selbar" hidden><button class="lk" id="selall">همه</button><button class="lk" id="selnone">هیچ</button><b id="seln">0</b><button class="lk" id="selcatb">📂 دسته</button><button class="lk bad" id="seldel">🗑 حذف</button><button class="lk" id="selx" style="color:var(--mut)">✕</button></div>
+<div class="sh" id="usheet" role="dialog" aria-modal="true"><div class="pn" style="max-width:420px">
+<div class="pnh" id="ush-t">تب جدید</div>
+<label for="u-name">نام تب</label>
+<input id="u-name" maxlength="24" placeholder="مثلاً یادداشت‌ها">
+<label>آیکون</label>
+<div class="uem-row" id="u-ems"></div>
+<div class="row2" style="margin-top:12px"><button class="go" id="ush-ok">ساختن تب</button><button class="lk" id="ush-x">انصراف</button></div>
+<button class="lk" id="ush-del" hidden style="width:100%;color:var(--short);margin-top:6px">حذف این تب</button>
+</div></div>
 <div class="sh" id="ss" role="dialog" aria-modal="true"><div class="pn">
 <div class="pnh">تنظیمات</div>
 <div class="seg sst" id="sst"><button data-p="n" class="on">🔔 اعلان‌ها</button><button data-p="l">📋 لاگ</button><button data-p="a">👤 حساب</button></div>
@@ -1750,7 +1804,7 @@ html[dir=ltr] .tb button.on{box-shadow:inset 0 -2px 0 var(--acc)}
 let LANG='fa';try{LANG=localStorage.getItem('lang')==='en'?'en':'fa'}catch(e){}
 const I18N=Object.assign(Object.create(null),{"آلارمها": "Alerts", "ارسال کد به ایمیل جدید": "Send code to the new email", "ارسال کد تایید": "Send verification code", "اعلان از طریق": "Notify via", "انصراف": "Cancel", "اهداف (TP / SL)": "Targets (TP / SL)", "ایمیل": "Email", "ایمیل جدید": "New email", "ایمیل دریافت اعلان": "Notification email", "باز کردن ربات در تلگرام ↗": "Open the bot in Telegram ↗", "بستن": "Close", "تاریک": "Dark", "تایید کد": "Verify code", "تغییر رمز": "Change password", "تم": "Theme", "تنظیمات": "Settings", "توکن ربات از BotFather": "Bot token from BotFather", "تکرار رمز": "Repeat password", "ثبت آلارم": "Create alert", "ثبت توکن": "Save token", "جهت": "Direction", "حذف ایمیل": "Remove email", "حساب تو با «نام کاربری» ساخته شده؛ یک ایمیل برایش ثبت کن.": "Your account was created with a username; add an email to it.", "حساب:": "Account:", "خروج از حساب": "Log out", "در حال بارگذاری…": "Loading…", "درصد ریسک (%)": "Risk (%)", "ذخیره سناریو": "Save scenario", "ذخیره واچلیست": "Save watchlist", "رایگان از resend.com بگیر. بدون دامنه‌ی تاییدشده، کد فقط به ایمیل خودِ حساب Resend فرستاده می‌شود.": "Get one free at resend.com. Without a verified domain, the code can only be sent to the email of the Resend account itself.", "ربات تلگرام (دریافت اعلان‌ها)": "Telegram bot (receives alerts)", "رمز جدید (حداقل ۸ کاراکتر)": "New password (min. 8 characters)", "رمز عبور": "Password", "رمز فعلی": "Current password", "روشن": "Light", "سایز پوزیشن ($)": "Position size ($)", "سرمایه حساب (USD)": "Account balance (USD)", "سناریو": "Scenario", "سناریوی روزانه…": "Daily scenario…", "سیستم": "System", "فاصله حد ضرر:": "Stop distance:", "فرستنده (اختیاری) Alerts <a@yourdomain.com>": "Sender (optional) Alerts <a@yourdomain.com>", "قطع اتصال ربات": "Disconnect bot", "قیمت حد ضرر ($)": "Stop-loss price ($)", "قیمت ورود ($)": "Entry price ($)", "قیمت ورود (اختیاری — خالی = نمایش داده نمی‌شود)": "Entry price (optional — empty = not shown)", "لوریج (x)": "Leverage (x)", "ماشین حساب": "Calculator", "مثلاً 0.2462": "e.g. 0.2462", "نوشنال:": "Notional:", "واچ لیست": "Watchlist", "واچلیست هفتگی…": "Weekly watchlist…", "ورود": "Log in", "پنل آلارم": "Alerts panel", "کارمزد خروج (%) — اختیاری": "Exit fee (%) — optional", "کارمزد ورود (%) — اختیاری": "Entry fee (%) — optional", "کد ارسال‌شده به ایمیل جدید": "Code sent to the new email", "کد تایید (به ایمیلت فرستاده شد)": "Verification code (sent to your email)", "کد ۶ رقمی": "6-digit code", "کلید API سرویس ایمیل (Resend)": "Email service API key (Resend)", "کوین": "Coin", "۱) لینک زیر را بزن و در تلگرام Start را بزن ۲) برگرد و «تشخیص» را بزن": "1) Open the link below and press Start in Telegram 2) Come back and press “Detect”", "✉️ ایمیل": "✉️ Email", "✓ تشخیص چت (بعد از Start)": "✓ Detect chat (after Start)", "＋ آلارم جدید": "＋ New alert", "＋ هدف دیگر": "＋ Add target", "📨 تلگرام": "📨 Telegram", "🧪 تست تلگرام و ایمیل": "🧪 Test Telegram & email", "آلارم فعال": "Active alerts", "ارسال نشد": "Could not send", "از تنظیمات ورکر استفاده می‌شود (برای تغییر، توکن جدید بده)": "Using the bot set on the worker (enter a new token to change)", "انجام نشد": "Failed", "ایمیل تایید شد ✓": "Email verified ✓", "ایمیل ثبت شد ✓": "Email saved ✓", "ایمیل حذف بشه؟ آلارم‌هایی که ایمیل دارن فقط از تلگرام اعلان می‌گیرن.": "Remove the email? Alerts that use email will only notify via Telegram.", "ایمیل را وارد کن": "Enter your email", "ایمیل معتبر وارد کن.": "Enter a valid email.", "ایمیل یا رمز اشتباه است.": "Wrong email or password.", "ایمیلی تایید نشده": "No verified email", "این آلارم حذف بشه؟": "Delete this alert?", "این ایمیل اجازه‌ی ثبت‌نام ندارد.": "This email is not allowed to register.", "این ایمیل مجاز نیست.": "This email is not allowed.", "این همان ایمیل فعلی است.": "This is already your current email.", "این چت‌ها به ربات پیام داده‌اند. چت خودت را انتخاب کن:": "These chats have messaged the bot. Pick your chat:", "با دکمه‌ی پایین اولین رو بساز.": "Create your first one with the button below.", "بازار زنده": "Live market", "بازگشت به ورود": "Back to login", "بازیابی رمز": "Password recovery", "تایید ایمیل": "Verify email", "تایید نشد": "Verification failed", "تایید و ادامه": "Verify & continue", "تست انجام نشد": "Test failed", "تشخیص انجام نشد": "Detection failed", "تلاش زیاد؛ کمی بعد دوباره امتحان کن.": "Too many attempts; try again in a little while.", "تلگرام": "Telegram", "توضیح (مثلاً TP1 / استاپ)": "Note (e.g. TP1 / Stop)", "توکن ربات را وارد کن": "Enter the bot token", "توکن معتبر نیست.": "The token is not valid.", "تکرار رمز یکسان نیست.": "The repeated password does not match.", "ثبت نشد": "Could not save", "ثبت‌نام — ساخت حساب": "Sign up — create account", "جابه‌جایی ذخیره نشد": "Could not save the new order", "حد ضرر نمی‌تواند برابر قیمت ورود باشد.": "The stop-loss cannot equal the entry price.", "حداقل یک روش اعلان را انتخاب کن": "Choose at least one notification method", "حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.": "Your account is still using a username. Please add an email in the “Account” section.", "خطا": "Error", "خطا در دریافت اطلاعات": "Could not load data", "درصد ریسک باید بین 0 و 100 باشد.": "Risk must be between 0 and 100.", "دریافت کد در ایمیل": "Get code by email", "ذخیره شد ✓": "Saved ✓", "ذخیره نشد": "Could not save", "ربات متصل نیست": "Bot not connected", "ربات قطع بشه؟ تا وصل مجدد، اعلان تلگرامی نمی‌آید.": "Disconnect the bot? No Telegram alerts will arrive until it is connected again.", "ربات وصل شد ✓ (یک پیام تایید برایت فرستاده شد)": "Bot connected ✓ (a confirmation message was sent to you)", "رمز باید حداقل ۸ کاراکتر باشد.": "The password must be at least 8 characters.", "رمز تغییر کرد ✓": "Password changed ✓", "رمز جدید باید حداقل ۸ کاراکتر باشد.": "The new password must be at least 8 characters.", "رمز را فراموش کردم": "Forgot password", "رمز فعلی اشتباه است.": "The current password is wrong.", "رمز فعلی را وارد کن.": "Enter your current password.", "سرمایه باید بزرگتر از صفر باشد.": "Balance must be greater than zero.", "قیمت": "Price", "قیمت ورود باید بزرگتر از صفر باشد.": "Entry price must be greater than zero.", "لانگ / شورت": "Long / Short", "لوریج باید بزرگتر از صفر باشد.": "Leverage must be greater than zero.", "مقادیر را وارد کنید…": "Enter the values…", "هدف": "Target", "هدف خورده": "Targets hit", "هدف در انتظار": "Pending targets", "هنوز آلارمی نداری.": "You have no alerts yet.", "ورود به پنل": "Log in to the panel", "کارمزد نمی‌تواند منفی باشد.": "Fees cannot be negative.", "کد اشتباه است.": "Wrong code.", "کد به ایمیل جدید فرستاده شد (اسپم را هم ببین).": "A code was sent to the new email (check spam too).", "کد تایید به ایمیل فرستاده شد (۱۰ دقیقه اعتبار دارد)": "A verification code was sent to your email (valid for 10 minutes)", "کد ۶ رقمی به ایمیلت فرستاده شد (پوشه‌ی اسپم را هم ببین).": "A 6-digit code was sent to your email (check the spam folder too).", "کلید API سرویس ایمیل را وارد کن.": "Enter the email service API key.", "کوین و حداقل یک قیمت لازمه": "A coin and at least one price are required", "یک Webhook قدیمی روی این ربات بود و حذف شد. حالا لینک را بزن و در تلگرام Start را (دوباره) بزن.": "An old webhook was set on this bot and has been removed. Now open the link and press Start (again) in Telegram.", "یک برنامه‌ی دیگر (مثلاً ربات قدیمی روی سرور) هم‌زمان با همین توکن پیام می‌گیرد. آن را خاموش کن یا برای پنل یک ربات جدید بساز.": "Another program (e.g. an old bot on a server) is reading messages with the same token. Turn it off or create a new bot for the panel.", "— (ایمیل تایید نشده)": "— (email not verified)", "⚠️ سرویس ایمیل تنظیم نشده": "⚠️ Email service is not configured", "⚠️ هنوز هیچ چک خودکاری ثبت نشده — Cron Trigger ورکر را چک کن (Settings → Triggers → Cron Triggers)": "⚠️ No automatic check has been recorded yet — check the worker Cron Trigger (Settings → Triggers → Cron Triggers)", "✓ فرستاده شد": "✓ Sent", "✓ همه‌ی اهداف خورده": "✓ All targets hit", "(اول ایمیل را در ⚙️ تنظیمات تایید کن)": "(first verify your email in ⚙️ Settings)", "✗ ربات تلگرام وصل نیست (تنظیمات ← ربات تلگرام)": "✗ Telegram bot is not connected (Settings → Telegram bot)", "دستهبندی": "Category", "بدون دسته": "Uncategorized", "همه": "All", "فعال": "Active", "تمامشده": "Done", "⚙ مدیریت دستهها": "⚙ Manage categories", "＋ دسته جدید": "＋ New category", "دستهبندیها": "Categories", "آلارمها را گروهبندی کن؛ با فیلتر بالای لیست فقط دستهی موردنظر را ببین.": "Group your alerts; with the filter above the list you see only the category you want.", "نام دسته جدید…": "New category name…", "افزودن": "Add", "هنوز دستهای نساختی.": "No categories yet.", "نام دسته را وارد کن": "Enter a category name", "دستهای با این نام هست": "A category with this name already exists", "ساخته نشد": "Could not create", "حذف": "Delete", "حذف شد ✓": "Deleted ✓", "حذف نشد": "Could not delete", "تغییر رنگ": "Change color", "تغییر تم": "Toggle theme", "این دسته حذف بشه؟ آلارمهای داخلش بدون دسته میشن.": "Delete this category? Its alerts will become uncategorized.", "با این فیلترها آلارمی پیدا نشد.": "No alerts match these filters.", "پاک کردن فیلترها": "Clear filters", "برای جابهجایی، اول فیلترها را پاک کن": "Clear the filters first, then drag to reorder", "🔍 جستجوی کوین…": "🔍 Search coin…", "بدون جهت": "No direction", "جهت (اختیاری)": "Direction (optional)", "انتخاب چند آلارم": "Select multiple alerts", "انتقال به دسته": "Move to category", "انتخابشده": "selected", "حذف موارد انتخابشده؟": "Delete the selected items?", "انجام شد ✓": "Done ✓", "هیچ": "None", "دسته": "Category", "📂 دسته": "📂 Category", "🗑 حذف": "🗑 Delete", "سناریوی جدید": "New scenario", "ویرایش سناریو": "Edit scenario", "عنوان": "Title", "مثلاً دیدگاه هفتگی": "e.g. weekly outlook", "متن": "Text", "متن سناریو…": "Scenario text…", "بدون عنوان": "Untitled", "ذخیره": "Save", "سناریویی ثبت نشده.": "No scenarios yet.", "با دکمهی پایین اولین سناریو را بساز.": "Create the first scenario with the button below.", "واچلیست خالیه.": "The watchlist is empty.", "با دکمهی پایین اولین آیتم را اضافه کن.": "Add the first item with the button below.", "با این فیلترها موردی پیدا نشد.": "Nothing matches these filters.", "آیتم واچلیست": "Watchlist item", "ویرایش آیتم": "Edit item", "یادداشت (اختیاری)…": "Note (optional)…", "اول کوین را وارد کن": "Enter a coin first", "چیزی برای ذخیره نیست": "Nothing to save", "این مورد حذف بشه؟": "Delete this item?", "🔔 اعلانها": "🔔 Notifications", "👤 حساب": "👤 Account", "دستهبندی آلارمها": "Alert categories", "دستهبندی واچلیست": "Watchlist categories", "دستهبندی سناریو": "Scenario categories", "🔍 جستجو…": "🔍 Search…", "نام واچلیست": "Watchlist name", "واچلیست جدید": "New watchlist", "ویرایش واچلیست": "Edit watchlist", "＋ واچلیست جدید": "＋ New watchlist", "با دکمهی پایین اولین واچلیست را بساز.": "Create your first watchlist with the button below.", "اول نام واچلیست را وارد کن": "Enter a watchlist name first", "یادداشت": "Note"});
 Object.assign(I18N,{'پوزیشنها':'Positions','پوزیشن جدید':'New position','ویرایش پوزیشن':'Edit position','پوزیشنی ثبت نشده.':'No positions yet.','با دکمهی پایین اولین پوزیشن را بنویس.':'Use the button below to write your first position.','مثلاً BTC لانگ از ۶۰ هزار':'e.g. BTC long from 60k','متن پوزیشن، دلیل ورود، حد ضرر، نکات…':'Position text, entry reason, stop loss, notes…','دستهبندی پوزیشنها':'Position categories','＋ پوزیشن جدید':'＋ New position','استراتژی':'Strategy','استراتژی جدید':'New strategy','ویرایش استراتژی':'Edit strategy','استراتژیای ثبت نشده.':'No strategies yet.','با دکمهی پایین اولین استراتژی را بنویس.':'Use the button below to write your first strategy.','مثلاً استراتژی شکست سقف':'e.g. Breakout strategy','شرایط ورود، خروج، مدیریت سرمایه، قوانین…':'Entry and exit rules, risk management…','دستهبندی استراتژی':'Strategy categories','＋ استراتژی جدید':'＋ New strategy','ترید تسک':'Trade tasks','تسک جدید':'New task','ویرایش تسک':'Edit task','تسکی ثبت نشده.':'No tasks yet.','با دکمهی پایین اولین ترید تسک را بنویس.':'Use the button below to write your first trade task.','مثلاً بررسی اخبار قبل از ورود':'e.g. Check the news before entering','کارهایی که قبل و بعد از ترید باید انجام بدی…':'Things to do before and after a trade…','دستهبندی ترید تسک':'Trade task categories','＋ تسک جدید':'＋ New task'});
-Object.assign(I18N,{'در حال تازهسازی…':'Refreshing…','⚠️ تازهسازی انجام نشد':'⚠️ Refresh failed','🔔 اعلان‌ها':'🔔 Alerts','👤 حساب':'👤 Account','ایمیل حساب':'Account email','برای تغییر ایمیل یا رمز، اول رمز فعلی را وارد کن.':'To change your email or password, enter your current password first.','رمز عبور':'Password','✉️ ایمیل':'✉️ Email','📋 لاگ':'📋 Log','لاگ':'Log','تازهسازی':'Refresh'});
+Object.assign(I18N,{'تب جدید':'New tab','ویرایش تب':'Edit tab','نام تب':'Tab name','آیکون':'Icon','ساختن تب':'Create tab','حذف این تب':'Delete this tab','مثلاً یادداشتها':'e.g. Notes','هر چیزی دوست داری اینجا بنویس…':'Write anything here…','در حال ذخیره…':'Saving…','ذخیره شد ✓':'Saved ✓','⚠️ ذخیره نشد':'⚠️ Not saved','افزودن تب':'Add tab','این تب و نوشتههایش برای همیشه حذف شود؟':'Delete this tab and its text permanently?','حداکثر ۱۰ تب دلخواه میشود ساخت':'You can create up to 10 custom tabs','انصراف':'Cancel','ذخیره':'Save','نام تب لازم است':'Tab name is required','در حال تازهسازی…':'Refreshing…','⚠️ تازهسازی انجام نشد':'⚠️ Refresh failed','🔔 اعلان‌ها':'🔔 Alerts','👤 حساب':'👤 Account','ایمیل حساب':'Account email','برای تغییر ایمیل یا رمز، اول رمز فعلی را وارد کن.':'To change your email or password, enter your current password first.','رمز عبور':'Password','✉️ ایمیل':'✉️ Email','📋 لاگ':'📋 Log','لاگ':'Log','تازهسازی':'Refresh'});
 Object.assign(I18N,{'مارجین لازم':'Margin needed','سرمایهای که باید وارد پوزیشن کنی':'Capital to put into the position','حجم پوزیشن':'Position size','تعداد':'Quantity','ریسک':'Risk','نسبت سود به ضرر':'Reward : risk','جهت:':'Direction:','فاصله حد ضرر:':'Stop distance:','فاصله حد سود:':'Take-profit distance:','قیمت لیکویید (تقریبی):':'Liquidation (approx.):','حساب':'Account','معامله':'Trade','کارمزد (اختیاری)':'Fees (optional)','حد سود ($) — اختیاری':'Take-profit ($) — optional','کارمزد ورود (%)':'Entry fee (%)','کارمزد خروج (%)':'Exit fee (%)','قیمت حد سود باید بزرگتر از صفر باشد.':'Take-profit price must be greater than zero.','حد سود باید در سمت سود باشد (بالاتر از ورود برای Long، پایینتر برای Short).':'Take-profit must be on the profit side (above entry for Long, below for Short).','حد ضرر بعد از قیمت لیکویید قرار دارد؛ لوریج را کم کن.':'The stop is beyond the liquidation price; lower the leverage.'});
 const nz=s=>s.replace(/\u200c/g,'').replace(/\s+/g,' ').trim();
 const PAT=[
@@ -1989,16 +2043,17 @@ $('#go').onclick=async()=>{
  $('#go').disabled=true;
  try{await api(eid?'PUT':'POST',eid?'/api/alerts/'+eid:'/api/alerts',{coin,direction:dir,entry:parseFloat($('#entry').value.replace(/,/g,'')),targets,ch,cat:newCat});closeSh('#sh');await load()}catch(e){say('ثبت نشد ('+e.message+')')}
  $('#go').disabled=false};
-function show(t){tab=t;['a','s','p','g','k','w','c'].forEach(x=>$('#p-'+x).hidden=x!==t);document.querySelectorAll('.tb button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+function show(t){if(tab!==t&&uCur)saveU();tab=t;const sec=isU(t)?'u':t;['a','s','p','g','k','w','c','u'].forEach(x=>$('#p-'+x).hidden=x!==sec);document.querySelectorAll('.tb button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
  if(t!=='a'&&selOn)exitSel();
- $('#fab').style.display=t==='c'?'none':'';$('#fab').textContent=t==='a'?'＋ آلارم جدید':t==='s'?'＋ سناریو جدید':t==='p'?'＋ پوزیشن جدید':t==='g'?'＋ استراتژی جدید':t==='k'?'＋ تسک جدید':'＋ واچلیست جدید';
+ if(isU(t))openU();
+ $('#fab').style.display=(t==='c'||isU(t))?'none':'';$('#fab').textContent=t==='a'?'＋ آلارم جدید':t==='s'?'＋ سناریو جدید':t==='p'?'＋ پوزیشن جدید':t==='g'?'＋ استراتژی جدید':t==='k'?'＋ تسک جدید':'＋ واچلیست جدید';
  if(t==='s'){if(Date.now()-_sAt>30000)loadS()}else if(t==='p'){if(Date.now()-_pAt>30000)loadP()}else if(t==='g'){if(Date.now()-_gAt>30000)loadG()}else if(t==='k'){if(Date.now()-_kAt>30000)loadK()}else  if(t==='w'){if(Date.now()-_wAt>30000)loadW()}else if(t==='a'&&Date.now()-_aAt>20000)refresh()}
 const TABS='aspgkwc';
 const STK=new Set(${JSON.stringify([...STOCK_TICKERS])});
 function fixCoin(){const i=$('#coin');let v=i.value.toUpperCase().replace(/[\s\/_-]/g,'');const m=/^([A-Z0-9]{1,12}?)(?:USDT)?(\.P)?$/.exec(v);if(m)v=m[1]+((m[2]||STK.has(m[1]))?'USDT.P':'');i.value=v}
 $('#coin').addEventListener('change',fixCoin);$('#coin').addEventListener('blur',fixCoin);
-document.querySelectorAll('.tb button').forEach(b=>b.onclick=()=>{show(b.dataset.t);try{history.pushState(null,'','#'+b.dataset.t)}catch(e){}try{localStorage.setItem('tab',b.dataset.t)}catch(e){}scrollTo(0,0)});
-addEventListener('popstate',()=>{const t=location.hash.slice(1);show(t.length===1&&TABS.includes(t)?t:'a')});
+document.querySelectorAll('.tb button[data-t]').forEach(b=>b.onclick=()=>{show(b.dataset.t);try{history.pushState(null,'','#'+b.dataset.t)}catch(e){}try{localStorage.setItem('tab',b.dataset.t)}catch(e){}scrollTo(0,0)});
+addEventListener('popstate',()=>{const t=location.hash.slice(1);show((t.length===1&&TABS.includes(t))||(isU(t)&&uget(t))?t:'a')});
 if('serviceWorker' in navigator)addEventListener('load',()=>{try{navigator.serviceWorker.register('/sw.js').catch(()=>{})}catch(e){}});
 const cv=id=>{const v=$(id).value.replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/,/g,'').trim();if(v==='')return null;const n=parseFloat(v);return isNaN(n)?null:n};
 const cf=(n,d)=>isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:d||2}):'—';
@@ -2173,6 +2228,36 @@ try{const c=JSON.parse(localStorage.getItem('acache')||'null');if(c&&Array.isArr
 load();setTimeout(checkLegacy,1200);setTimeout(()=>{if(tab==='a'&&!witems.length&&!sitems.length)loadW()},4000);setTimeout(()=>document.body.classList.remove('boot'),450);
 setInterval(()=>{if(!document.hidden&&tab==='a')refresh()},60000);
 setInterval(()=>{if(!document.hidden&&tab==='a')liveTick()},4000);
+
+/* ===== custom tabs ===== */
+let utabs=[],uCur=null,uTimer=0,uEm='📝',uEdit=null;
+const UEMS=['📝','📌','💡','📊','📈','🎯','⭐','📚','🔖','🧠','💰','🗒️'];
+const isU=t=>typeof t==='string'&&t.startsWith('u_');
+const uget=t=>utabs.find(x=>'u_'+x.id===t);
+function paintU(){const bar=document.querySelector('.tb'),add=$('#tbadd');bar.querySelectorAll('button[data-u]').forEach(b=>b.remove());
+ utabs.forEach(x=>{const b=document.createElement('button');b.dataset.t='u_'+x.id;b.dataset.u='1';const e=document.createElement('span');e.className='em';e.textContent=x.icon;const l=document.createElement('span');l.textContent=x.title;b.append(e,l);b.onclick=()=>goTab(b.dataset.t);bar.insertBefore(b,add)});
+ bar.classList.toggle('many',utabs.length>0);document.querySelectorAll('.tb button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab))}
+function goTab(t){show(t);try{history.pushState(null,'','#'+t)}catch(e){}try{localStorage.setItem('tab',t)}catch(e){}scrollTo(0,0)}
+function openU(){const x=uget(tab);if(!x)return;uCur=x;$('#u-em').textContent=x.icon;$('#u-ti').textContent=x.title;$('#u-t').value=x.text||'';$('#u-st').textContent=''}
+async function saveU(){clearTimeout(uTimer);if(!uCur)return;const x=uCur,v=$('#u-t').value;if(v===(x.text||''))return;$('#u-st').textContent='در حال ذخیره…';
+ try{await api('PUT','/api/tabs/'+x.id,{text:v});x.text=v;$('#u-st').textContent='ذخیره شد ✓'}catch(e){$('#u-st').textContent='⚠️ ذخیره نشد'}}
+$('#u-t').addEventListener('input',()=>{clearTimeout(uTimer);$('#u-st').textContent='';uTimer=setTimeout(saveU,1500)});
+$('#u-t').addEventListener('blur',saveU);
+addEventListener('pagehide',()=>{if(uCur&&$('#u-t').value!==(uCur.text||'')){try{fetch('/api/tabs/'+uCur.id,{method:'PUT',keepalive:true,headers:{'content-type':'application/json'},body:JSON.stringify({text:$('#u-t').value})})}catch(e){}}});
+function openUSheet(x){uEdit=x||null;uEm=x?x.icon:'📝';$('#ush-t').textContent=x?'ویرایش تب':'تب جدید';$('#u-name').value=x?x.title:'';$('#ush-ok').textContent=x?'ذخیره':'ساختن تب';$('#ush-del').hidden=!x;
+ const box=$('#u-ems');box.textContent='';UEMS.concat(x&&!UEMS.includes(x.icon)?[x.icon]:[]).forEach(e=>{const b=document.createElement('button');b.type='button';b.textContent=e;b.classList.toggle('on',e===uEm);b.onclick=()=>{uEm=e;box.querySelectorAll('button').forEach(y=>y.classList.toggle('on',y===b))};box.appendChild(b)});
+ $('#usheet').classList.add('on');setTimeout(()=>$('#u-name').focus(),50)}
+$('#tbadd').onclick=()=>{if(utabs.length>=10){say('حداکثر ۱۰ تب دلخواه می‌شود ساخت');return}openUSheet(null)};
+$('#u-ed').onclick=()=>{const x=uget(tab);if(x)openUSheet(x)};
+$('#ush-x').onclick=()=>closeSh('#usheet');
+$('#ush-ok').onclick=async()=>{const name=$('#u-name').value.trim();if(!name){$('#u-name').focus();return}
+ try{if(uEdit){const r=await api('PUT','/api/tabs/'+uEdit.id,{title:name,icon:uEm});Object.assign(uEdit,r.tab);paintU();if(uCur&&uCur.id===uEdit.id)openU()}
+  else{const r=await api('POST','/api/tabs',{title:name,icon:uEm});utabs.push(r.tab);paintU();goTab('u_'+r.tab.id);setTimeout(()=>$('#u-t').focus(),60)}
+  closeSh('#usheet')}catch(e){say(String(e.message))}};
+$('#ush-del').onclick=()=>ask('این تب و نوشته‌هایش برای همیشه حذف شود؟',async()=>{try{await api('DELETE','/api/tabs/'+uEdit.id);utabs=utabs.filter(x=>x.id!==uEdit.id);uCur=null;closeSh('#usheet');paintU();goTab('a')}catch(e){say(String(e.message))}});
+$('#u-name').addEventListener('keydown',e=>{if(e.key==='Enter')$('#ush-ok').click()});
+async function loadU(){try{const r=await api('GET','/api/tabs');utabs=r.tabs||[];paintU();const h=location.hash.slice(1);let t=isU(h)?h:'';if(!t){try{t=localStorage.getItem('tab')||''}catch(e){}}if(isU(t)&&uget(t))show(t)}catch(e){}}
+loadU();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&tab==='a'&&Date.now()-_aAt>15000)refresh()});
 (()=>{let t=location.hash.slice(1);if(!(t.length===1&&TABS.includes(t))){try{t=localStorage.getItem('tab')||''}catch(e){t=''}}if(t.length===1&&TABS.includes(t)&&t!=='a')show(t)})();
 </script></body></html>`;
