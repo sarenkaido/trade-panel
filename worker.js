@@ -1395,12 +1395,11 @@ body.selmode .card{cursor:pointer}
 .wnote{padding:10px 15px 12px;font-size:13px;color:var(--tx2);border-top:1px solid var(--line);white-space:pre-wrap;word-break:break-word;line-height:1.9}
 .stext{padding:11px 15px 13px;font-size:13.5px;line-height:2;color:var(--tx2);white-space:pre-wrap;word-break:break-word;
   border-top:1px solid var(--line);max-height:320px;overflow:auto}
-.tbadd{opacity:.8;margin-inline-start:10px;border-inline-start:1px solid var(--line)!important}@media(min-width:920px){.tb .tbadd{margin:10px 0 0;border-inline-start:0!important;border-top:1px solid var(--line)!important;border-bottom:0!important}}.tb .em{font-size:17px;line-height:1;flex:none}
+.tbadd{opacity:.8}.tb .tbsep{flex:none;align-self:stretch;width:1px;margin:10px 6px;background:var(--line)}@media(min-width:920px){.tb .tbsep{width:auto;height:12px;margin:0;border-bottom:1px solid var(--line);background:var(--bg)}}.tb .em{font-size:17px;line-height:1;flex:none}
 @media (max-width:520px){.tb.many button{flex:0 0 auto;min-width:66px;padding:6px 8px}}
 .uh{display:flex;align-items:center;gap:8px;margin:2px 0 10px}.uh b{font-size:16px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .uem{font-size:22px;line-height:1}.ust{font-size:11.5px;color:var(--mut)}
-.uta{width:100%;min-height:52vh;resize:vertical;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-size:14.5px;line-height:1.9;outline:0}
-.uta:focus{border-color:var(--acc)}
+.uta{display:block;width:100%;min-height:60vh;resize:none;overflow:hidden;padding:4px 2px 80px;border:0;border-radius:0;background:transparent;color:var(--tx);font:inherit;font-size:15px;line-height:2;outline:0;box-shadow:none}
 .uem-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.uem-row button{width:42px;height:42px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-size:20px;cursor:pointer}
 .uem-row button.on{border-color:var(--acc);box-shadow:0 0 0 2px color-mix(in srgb,var(--acc) 30%,transparent)}
 .sst{margin:6px 0 10px}
@@ -2352,15 +2351,16 @@ let utabs=[],uCur=null,uTimer=0,uEm='📝',uEdit=null;
 const UEMS=['📝','📌','💡','📊','📈','🎯','⭐','📚','🔖','🧠','💰','🗒️'];
 const isU=t=>typeof t==='string'&&t.startsWith('u_');
 const uget=t=>utabs.find(x=>'u_'+x.id===t);
-function paintU(){const bar=document.querySelector('.tb'),add=$('#tbadd');bar.querySelectorAll('button[data-u]').forEach(b=>b.remove());
+function paintU(){const bar=document.querySelector('.tb'),add=$('#tbadd');bar.querySelectorAll('[data-u]').forEach(b=>b.remove());const sp=document.createElement('i');sp.className='tbsep';sp.dataset.u='1';bar.insertBefore(sp,add);
  utabs.forEach(x=>{const b=document.createElement('button');b.dataset.t='u_'+x.id;b.dataset.u='1';const e=document.createElement('span');e.className='em';e.textContent=x.icon;const l=document.createElement('span');l.textContent=x.title;b.append(e,l);b.onclick=()=>goTab(b.dataset.t);bar.insertBefore(b,add)});
  bar.classList.toggle('many',utabs.length>0);document.querySelectorAll('.tb button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab))}
 function goTab(t){show(t);try{history.pushState(null,'','#'+t)}catch(e){}try{localStorage.setItem('tab',t)}catch(e){}scrollTo(0,0)}
-function openU(){const x=uget(tab);if(!x)return;uCur=x;$('#u-em').textContent=x.icon;$('#u-ti').textContent=x.title;$('#u-t').value=x.text||'';$('#u-st').textContent=''}
+function fitU(){const t=$('#u-t');t.style.height='auto';t.style.height=Math.max(t.scrollHeight,innerHeight*.6)+'px'}
+function openU(){const x=uget(tab);if(!x)return;uCur=x;$('#u-em').textContent=x.icon;$('#u-ti').textContent=x.title;$('#u-t').value=x.text||'';$('#u-st').textContent='';fitU();requestAnimationFrame(fitU)}
 async function saveU(){clearTimeout(uTimer);if(!uCur)return;const x=uCur,v=$('#u-t').value;if(v===(x.text||''))return;$('#u-st').textContent='در حال ذخیره…';
  try{await api('PUT','/api/tabs/'+x.id,{text:v});x.text=v;$('#u-st').textContent='ذخیره شد ✓'}catch(e){$('#u-st').textContent='⚠️ ذخیره نشد'}}
-$('#u-t').addEventListener('input',()=>{clearTimeout(uTimer);$('#u-st').textContent='';uTimer=setTimeout(saveU,1500)});
-$('#u-t').addEventListener('blur',saveU);
+$('#u-t').addEventListener('input',()=>{fitU();clearTimeout(uTimer);$('#u-st').textContent='';uTimer=setTimeout(saveU,1500)});
+$('#u-t').addEventListener('blur',saveU);addEventListener('resize',()=>{if(uCur)fitU()});
 addEventListener('pagehide',()=>{if(uCur&&$('#u-t').value!==(uCur.text||'')){try{fetch('/api/tabs/'+uCur.id,{method:'PUT',keepalive:true,headers:{'content-type':'application/json'},body:JSON.stringify({text:$('#u-t').value})})}catch(e){}}});
 function openUSheet(x){uEdit=x||null;uEm=x?x.icon:'📝';$('#ush-t').textContent=x?'ویرایش تب':'تب جدید';$('#u-name').value=x?x.title:'';$('#ush-ok').textContent=x?'ذخیره':'ساختن تب';$('#ush-del').hidden=!x;
  const box=$('#u-ems');box.textContent='';UEMS.concat(x&&!UEMS.includes(x.icon)?[x.icon]:[]).forEach(e=>{const b=document.createElement('button');b.type='button';b.textContent=e;b.classList.toggle('on',e===uEm);b.onclick=()=>{uEm=e;box.querySelectorAll('button').forEach(y=>y.classList.toggle('on',y===b))};box.appendChild(b)});
