@@ -286,11 +286,11 @@ async function checkPricesOnce(env) {
       return Number.isFinite(t) ? t : 0;
     }));
     return age(x) - age(y);
-  }).slice(0, 6);
+  }).slice(0, 3);
   const priceMap = {};
   await Promise.all(coinsP.map(async (coin) => { priceMap[coin] = await getPrice(coin); }));
 
-  // At most four symbols receive three extra candle-source attempts: up to 4 × 8 + 4 × 3 = 44 requests.
+  // At most three symbols receive three extra candle-source attempts: up to 3 × 8 + 3 × 3 = 33 requests, leaving headroom for notifications.
   const rangeMap = {};
   if (coinsP.length <= 4) await Promise.all(coinsP.map(async (coin) => { rangeMap[coin] = await getCandles(coin); }));
 
