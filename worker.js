@@ -85,7 +85,10 @@ async function tgToken(env) { return (await kvGetJSON(env, "tg", {})).token || e
 let _dbInit = null;
 async function dbReady(env) {
   if (!env.DB) return false;
-  if (!_dbInit) _dbInit = env.DB.exec("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID").catch((e) => { _dbInit = null; throw e; });
+  if (!_dbInit) _dbInit = env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS rate_limits (k TEXT PRIMARY KEY, n INTEGER NOT NULL, window_start INTEGER NOT NULL) WITHOUT ROWID")
+  ]).catch((e) => { _dbInit = null; throw e; });
   await _dbInit;
   return true;
 }
@@ -154,12 +157,19 @@ async function getPerp(b) {
 
 // Spot prices fall through a list of exchanges (some block Workers IPs). The last working one is tried first.
 async function tryPrice(url, pick, ms) {
+  const host = (() => { try { return new URL(url).hostname; } catch (e) { return "unknown"; } })();
+  const started = Date.now();
   try {
     const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(ms || PRICE_FETCH_TIMEOUT_MS) });
-    if (!res.ok) return null;
-    const v = parseFloat(pick(await res.json()));
-    return isFinite(v) && v > 0 ? v : null;
-  } catch (e) { return null; }
+    if (!res.ok) { console.log("[exchange] " + host + " HTTP " + res.status); return null; }
+    const value = parseFloat(pick(await res.json()));
+    if (!Number.isFinite(value) || value <= 0) { console.log("[exchange] " + host + " invalid price payload"); return null; }
+    return value;
+  } catch (e) {
+    const reason = e && e.name === "TimeoutError" ? "timeout" : String(e && e.message || e).slice(0, 100);
+    console.log("[exchange] " + host + " " + reason + " after " + (Date.now() - started) + "ms");
+    return null;
+  }
 }
 const SPOT_SOURCES = [
   (c) => ["https://www.okx.com/api/v5/market/ticker?instId=" + c + "-USDT", (d) => d?.data?.[0]?.last],
@@ -231,7 +241,7 @@ function parseNote(note) {
 
 
 // High/low of the last few 1-minute candles: a wick that touched a target between two cron ticks still fires the alert.
-async function getRange(coin) {
+async function getCandles(coin) {
   const c = (splitCoin(coin) || { base: coin.toUpperCase() }).base;
   const srcs = [
     [`https://api.bybit.com/v5/market/kline?category=linear&symbol=${c}USDT&interval=1&limit=3`, (d) => d?.result?.list],
@@ -241,13 +251,21 @@ async function getRange(coin) {
   for (const [url, pick] of srcs) {
     try {
       const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(2500) });
+      if (!res.ok) continue;
       const rows = pick(await res.json());
-      if (!Array.isArray(rows) || !rows.length) continue;
-      const hi = Math.max(...rows.map((r) => parseFloat(r[2]))), lo = Math.min(...rows.map((r) => parseFloat(r[3])));
-      if (isFinite(hi) && isFinite(lo) && hi > 0) return { hi, lo };
-    } catch (e) { /* try next */ }
+      if (Array.isArray(rows) && rows.length) return rows;
+    } catch (e) { console.log("[wick] " + c + " source error: " + e); }
   }
   return null;
+}
+function getRange(rows, createdAt) {
+  if (!Array.isArray(rows)) return null;
+  const parsed = Date.parse(createdAt || "");
+  const since = Number.isFinite(parsed) ? parsed : 0;
+  const fresh = rows.filter((r) => Number(r[0]) >= since);
+  if (!fresh.length) return null;
+  const hi = Math.max(...fresh.map((r) => parseFloat(r[2]))), lo = Math.min(...fresh.map((r) => parseFloat(r[3])));
+  return Number.isFinite(hi) && Number.isFinite(lo) && hi > 0 ? { hi, lo } : null;
 }
 
 let _lastInfo = { pending: 0, missing: [] };
@@ -262,26 +280,34 @@ async function checkPricesOnce(env) {
   _lastInfo = { pending: pending.length, missing: [] };
   if (pending.length === 0) return [];
 
+  const coinsP = [...new Set(pending.map((a) => a.coin))].sort((x, y) => {
+    const age = (coin) => Math.min(...pending.filter((a) => a.coin === coin).map((a) => {
+      const t = Date.parse(a.last_checked || "");
+      return Number.isFinite(t) ? t : 0;
+    }));
+    return age(x) - age(y);
+  }).slice(0, 6);
   const priceMap = {};
-  await Promise.all([...new Set(pending.map((a) => a.coin))].map(async (coin) => { priceMap[coin] = await getPrice(coin); }));
+  await Promise.all(coinsP.map(async (coin) => { priceMap[coin] = await getPrice(coin); }));
 
-  // Wick detection costs one extra request per coin, so it is skipped when there are many coins (free plan: 50 subrequests per run).
+  // At most four symbols receive three extra candle-source attempts: up to 4 × 8 + 4 × 3 = 44 requests.
   const rangeMap = {};
-  const coinsP = [...new Set(pending.map((a) => a.coin))];
-  if (coinsP.length <= 15) await Promise.all(coinsP.map(async (coin) => { rangeMap[coin] = await getRange(coin); }));
+  if (coinsP.length <= 4) await Promise.all(coinsP.map(async (coin) => { rangeMap[coin] = await getCandles(coin); }));
 
   const newMsgs = [];
   const updates = {};
 
   for (const a of pending) {
+    if (!Object.prototype.hasOwnProperty.call(priceMap, a.coin)) continue;
     const price = priceMap[a.coin];
     if (price === null || price === undefined) {
       console.log(`[price] no price for ${a.coin}`);
       if (!_lastInfo.missing.includes(a.coin)) _lastInfo.missing.push(a.coin);
+      updates[a.id] = { last_checked: new Date().toISOString(), newlyTriggered: [], lastTriggeredTs: {} };
       continue;
     }
     const prev = a.prev_price;
-    const rg = rangeMap[a.coin], hi = rg ? Math.max(rg.hi, price) : price, lo = rg ? Math.min(rg.lo, price) : price;
+    const rg = getRange(rangeMap[a.coin], a.created_at), hi = rg ? Math.max(rg.hi, price) : price, lo = rg ? Math.min(rg.lo, price) : price;
     const upd = { prev_price: price, last_price: price, last_checked: new Date().toISOString(), newlyTriggered: [], lastTriggeredTs: {} };
     let needsPrevTracking = false;
 
@@ -357,9 +383,9 @@ async function checkPricesOnce(env) {
     for (const a of fresh.alerts || []) {
       const upd = updates[a.id];
       if (!upd) continue;
-      a.prev_price = upd.prev_price;
-      a.last_price = upd.last_price;
-      a.last_checked = upd.last_checked;
+      if (upd.prev_price !== undefined) a.prev_price = upd.prev_price;
+      if (upd.last_price !== undefined) a.last_price = upd.last_price;
+      if (upd.last_checked !== undefined) a.last_checked = upd.last_checked;
       if (upd.ref_price !== undefined && a.entry_price == null && a.ref_price == null) a.ref_price = upd.ref_price;
       if (upd.newlyTriggered.length > 0) {
         if (!a.triggered) a.triggered = [];
@@ -622,8 +648,33 @@ async function isLoggedIn(request, auth) {
 
 // Best-effort brute-force guard (per isolate): 5 wrong logins -> 10 minutes lock for that IP.
 const _fails = new Map();
-const lockedOut = (ip) => { const f = _fails.get(ip); return !!f && f.n >= 5 && Date.now() - f.t < 600000; };
-const noteFail = (ip) => { const f = _fails.get(ip); if (!f || Date.now() - f.t > 600000) _fails.set(ip, { n: 1, t: Date.now() }); else f.n++; };
+async function rateLimitKey(ip) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(ip || "unknown")));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function lockedOut(env, ip) {
+  const key = await rateLimitKey(ip), now = Date.now();
+  if (env.DB && await dbReady(env)) {
+    const row = await env.DB.prepare("SELECT n, window_start FROM rate_limits WHERE k = ?").bind(key).first();
+    return !!row && now - row.window_start < 600000 && row.n >= 5;
+  }
+  const f = _fails.get(key);
+  return !!f && f.n >= 5 && now - f.t < 600000;
+}
+async function noteFail(env, ip) {
+  const key = await rateLimitKey(ip), now = Date.now();
+  if (env.DB && await dbReady(env)) {
+    await env.DB.prepare("INSERT INTO rate_limits (k,n,window_start) VALUES (?,1,?) ON CONFLICT(k) DO UPDATE SET n=CASE WHEN ? - window_start >= 600000 THEN 1 ELSE n + 1 END, window_start=CASE WHEN ? - window_start >= 600000 THEN ? ELSE window_start END").bind(key, now, now, now, now).run();
+    return;
+  }
+  const f = _fails.get(key);
+  if (!f || now - f.t > 600000) _fails.set(key, { n: 1, t: now }); else f.n++;
+}
+async function clearFails(env, ip) {
+  const key = await rateLimitKey(ip);
+  _fails.delete(key);
+  if (env.DB && await dbReady(env)) await env.DB.prepare("DELETE FROM rate_limits WHERE k = ?").bind(key).run();
+}
 
 // Registration / password reset are confirmed with a one-time code e-mailed to the account address.
 async function sendCode(env, to, label, code, ov, en) {
@@ -825,12 +876,12 @@ async function handleApi(request, env, url) {
 
   if (M === "POST" && p === "/api/login") {
     if (!auth) return jsonRes({ error: "no account yet" }, 400);
-    if (lockedOut(ip)) return jsonRes({ error: "too many attempts" }, 429);
+    if (await lockedOut(env, ip)) return jsonRes({ error: "too many attempts" }, 429);
     const b = await body();
     const hash = await pbkdf2(String(b.password || ""), auth.salt); // always computed, so timing doesn't reveal the email
     const ok = String(b.email || "").trim().toLowerCase() === auth.user && safeEqual(hash, auth.hash);
-    if (!ok) { noteFail(ip); await new Promise((r) => setTimeout(r, 800)); return jsonRes({ error: "wrong password" }, 401); }
-    _fails.delete(ip);
+    if (!ok) { await noteFail(env, ip); await new Promise((r) => setTimeout(r, 800)); return jsonRes({ error: "wrong password" }, 401); }
+    await clearFails(env, ip);
     return jsonRes({ ok: true }, 200, sess(await makeSession(auth)));
   }
   // Step 1 of register / forgot-password: validate, hash the password, e-mail a one-time code.
@@ -1043,7 +1094,7 @@ async function handleApi(request, env, url) {
     if (cat) { const cs = await kvGetJSON(env, "cats", []); if (!Array.isArray(cs) || !cs.some((c) => c.id === cat)) cat = 0; }
     const data = await kvGetJSON(env, "alerts", { alerts: [], last_id: 0 });
     const aid = (data.last_id || 0) + 1;
-    data.alerts.push({ id: aid, coin, targets: built, triggered: [], prev_price: null, entry_price: hasEntry ? entryIn : null, ref_price: refPrice, ch, cat });
+    data.alerts.push({ id: aid, coin, targets: built, triggered: [], created_at: new Date().toISOString(), prev_price: null, entry_price: hasEntry ? entryIn : null, ref_price: refPrice, ch, cat });
     data.last_id = aid;
     await kvSetJSON(env, "alerts", data);
     return jsonRes({ ok: true, id: aid });
@@ -1158,10 +1209,7 @@ async function handleApi(request, env, url) {
     await kvSetJSON(env, "alerts", data);
     return jsonRes({ ok: true });
   }
-  if (M === "POST" && p === "/api/sync") {
-    const msgs = await checkPricesOnce(env);
-    return jsonRes({ ok: true, n: msgs.length });
-  }
+  if (M === "POST" && p === "/api/sync") return jsonRes({ error: "deprecated; use /api/check-now" }, 410);
   const mt = p.match(/^\/api\/alerts\/(\d+)\/tick$/);
   if (mt && M === "POST") {
     const id = parseInt(mt[1], 10), tid = parseInt((await body()).tid, 10);
