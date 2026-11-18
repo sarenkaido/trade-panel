@@ -1277,7 +1277,7 @@ body.selmode .card{cursor:pointer}
 .wnote{padding:10px 15px 12px;font-size:13px;color:var(--tx2);border-top:1px solid var(--line);white-space:pre-wrap;word-break:break-word;line-height:1.9}
 .stext{padding:11px 15px 13px;font-size:13.5px;line-height:2;color:var(--tx2);white-space:pre-wrap;word-break:break-word;
   border-top:1px solid var(--line);max-height:320px;overflow:auto}
-.tbadd{opacity:.8}.tb .em{font-size:17px;line-height:1;flex:none}
+.tbadd{opacity:.8;margin-inline-start:10px;border-inline-start:1px solid var(--line)!important}@media(min-width:920px){.tb .tbadd{margin:10px 0 0;border-inline-start:0!important;border-top:1px solid var(--line)!important;border-bottom:0!important}}.tb .em{font-size:17px;line-height:1;flex:none}
 @media (max-width:520px){.tb.many button{flex:0 0 auto;min-width:66px;padding:6px 8px}}
 .uh{display:flex;align-items:center;gap:8px;margin:2px 0 10px}.uh b{font-size:16px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .uem{font-size:22px;line-height:1}.ust{font-size:11.5px;color:var(--mut)}
