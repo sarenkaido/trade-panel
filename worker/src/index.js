@@ -4,7 +4,7 @@ async function signedInitData(botToken) {
   params.set('query_id', 'worker_cron_' + Date.now());
   params.set('start_param', 'worker-cron');
   params.set('user', JSON.stringify({ id: 1, first_name: 'Scheduler', username: 'miniapp_scheduler' }));
-  const check = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => k + '=' + v).join('\\n');
+  const check = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => k + '=' + v).join('\n');
   const encoder = new TextEncoder();
   const secretKey = await crypto.subtle.importKey('raw', encoder.encode('WebAppData'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const secret = await crypto.subtle.sign('HMAC', secretKey, encoder.encode(botToken));
