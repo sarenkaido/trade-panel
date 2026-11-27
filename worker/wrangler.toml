@@ -1,0 +1,10 @@
+name = "telegram-mini-alerts"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+APP_ENV = "production"
+TGCLOUD_APP_URL = "https://appAPP_ID.tgcloud.ai"
