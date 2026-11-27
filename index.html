@@ -3,34 +3,56 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#10141d">
-  <title>هشدار قیمت</title>
+  <meta name="theme-color" content="#080d1b">
+  <meta name="color-scheme" content="dark">
+  <title>پنل آلارم</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vazirmatn@33.0.3/Vazirmatn-font-face.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/jetbrains-mono@5/index.css">
   <link rel="stylesheet" href="./styles.css">
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>\n  <script src="./config.js"></script>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="./config.js"></script>
 </head>
 <body>
+  <div class="bgfx" aria-hidden="true"></div>
   <main class="shell">
     <header class="top">
-      <div><span class="eyebrow">TRADE TOOLS</span><h1>هشدار قیمت</h1><p id="welcome">آلارم‌هایت را مدیریت کن</p></div>
-      <button id="refresh" class="icon-btn" aria-label="به‌روزرسانی">↻</button>
-    </header>
-    <section class="summary">
-      <div><span>کل آلارم‌ها</span><strong id="total">—</strong></div>
-      <div><span>فعال</span><strong id="active">—</strong></div>
-    </section>
-    <section class="panel">
-      <div class="section-head"><h2>آلارم جدید</h2><span class="hint">قیمت به تتر</span></div>
-      <form id="alert-form">
-        <label>نماد<input name="symbol" placeholder="BTC یا ETH" maxlength="20" required autocomplete="off"></label>
-        <div class="two">
-          <label>جهت<select name="direction"><option value="above">بالاتر از قیمت</option><option value="below">پایین‌تر از قیمت</option></select></label>
-          <label>قیمت هدف<input name="target" type="number" min="0.00000001" step="any" placeholder="95000" required></label>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M6 16V8"/><rect x="4.5" y="10" width="3" height="4" rx=".5"/><path d="M12 14V4"/><rect x="10.5" y="6" width="3" height="6" rx=".5"/><path d="M18 18V9"/><rect x="16.5" y="11" width="3" height="5" rx=".5"/></svg>
+        </span>
+        <div class="brand-copy">
+          <h1>پنل آلارم</h1>
+          <p id="welcome">مدیریت هشدارهای قیمت</p>
         </div>
-        <button class="primary" type="submit">＋ ساخت آلارم</button>
+      </div>
+      <button id="refresh" class="icon-btn" aria-label="به‌روزرسانی" title="به‌روزرسانی">↻</button>
+    </header>
+
+    <nav class="tabs" aria-label="بخش‌ها">
+      <button class="tab active" type="button"><span class="tab-icon">◈</span><span>آلارم‌ها</span></button>
+      <span class="tab-note">نسخه تلگرام</span>
+    </nav>
+
+    <section class="summary">
+      <article class="metric"><span>کل آلارم‌ها</span><strong id="total">—</strong></article>
+      <article class="metric"><span>آلارم‌های فعال</span><strong id="active">—</strong></article>
+    </section>
+
+    <section class="panel">
+      <div class="section-head"><div><h2>آلارم جدید</h2><p>برای نماد موردنظر قیمت هدف تعیین کن.</p></div><span class="hint">USDT</span></div>
+      <form id="alert-form">
+        <label>نماد کوین<input name="symbol" placeholder="BTC یا ETH" maxlength="20" required autocomplete="off" autocapitalize="characters"></label>
+        <div class="two">
+          <label>جهت رسیدن قیمت<select name="direction"><option value="above">بالاتر از قیمت</option><option value="below">پایین‌تر از قیمت</option></select></label>
+          <label>قیمت هدف<input name="target" type="number" min="0.00000001" step="any" placeholder="95000" required inputmode="decimal"></label>
+        </div>
+        <button class="primary" type="submit">＋ ثبت آلارم</button>
       </form>
     </section>
+
     <section class="list-section">
-      <div class="section-head"><h2>آلارم‌های من</h2><span id="status" class="status">در حال اتصال…</span></div>
+      <div class="section-head"><div><h2>آلارم‌های من</h2><p>هشدارهای ثبت‌شده برای حساب تلگرام تو</p></div><span id="status" class="status">در حال اتصال…</span></div>
       <div id="alerts" class="alerts"><div class="empty">در حال دریافت اطلاعات…</div></div>
     </section>
     <footer>اتصال امن از طریق حساب تلگرام شما</footer>
