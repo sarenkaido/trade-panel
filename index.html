@@ -1072,7 +1072,7 @@ $('#backup-in').onclick=async()=>{
  const btn=$('#backup-in');btn.disabled=true;
  try{
   const parsed=JSON.parse(await selectedBackupFile.text());
-  if(parsed.client)restoreClientBackup(parsed);
+  if(parsed.client){const v=parsed.client.localStorage;if(parsed.client.version!==1||!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!BACKUP_LOCAL_KEYS.includes(k)||typeof v[k]!=='string'||v[k].length>100000))throw new Error('بخش تنظیمات محلی بکاپ معتبر نیست')}
   await api('POST','/api/backup/import',parsed);
   if(parsed.client)restoreClientBackup(parsed);
   say('بازیابی اطلاعات سرور و تنظیمات محلی با موفقیت انجام شد. صفحه تازه‌سازی می‌شود.');
