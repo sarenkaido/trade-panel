@@ -62,7 +62,7 @@ jobs:
         run: |
           set -o pipefail
           npx wrangler deploy 2>&1 | tee /tmp/wrangler-deploy.log
-          URL=$(grep -Eo 'https://[a-zA-Z0-9-]+\.workers\.dev' /tmp/wrangler-deploy.log | tail -n 1)
+          URL=$(grep -Eo 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/wrangler-deploy.log | tail -n 1)
           if [ -z "$URL" ]; then
             echo "::error::Could not determine Worker URL from Wrangler output."
             exit 1
