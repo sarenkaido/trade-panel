@@ -57,7 +57,7 @@ async function checkUserAlerts(uid) {
       else if(dir==='short'){if(entry!=null&&level>entry){hit=price>=level;kind='🛑 SL';}else if(entry!=null){hit=price<=level;kind='✅ TP';}else hit=price<=level;}
       else{const prev=Number(a.prev_price);hit=price===level||(Number.isFinite(prev)&&((prev<level&&price>=level)||(prev>level&&price<=level)));}
       if(!hit)continue;
-      try{await api.sendMessage({chat_id:uid,text:(await read(uid,'settings',{})).lang==='en'?kind+' '+a.coin+' reached '+level+' (current '+price+')':kind+' هشدار '+a.coin+'\\nقیمت فعلی: '+price+'\\nقیمت هدف: '+level});a.triggered=a.triggered||[];a.triggered.push(tid);sent++;changed=true;}
+      try{await api.sendMessage({chat_id:uid,text:(await read(uid,'settings',{})).lang==='en'?kind+' '+a.coin+' reached '+level+' (current '+price+')':'🔔 هشدار '+a.coin+'\nقیمت فعلی: '+price+'\nقیمت هدف: '+level});a.triggered=a.triggered||[];a.triggered.push(tid);sent++;changed=true;}
       catch(e){console.warn('Immediate alert delivery failed',uid,a.id,e?.description||e?.message||String(e));}
     }
     a.prev_price=price;a.last_price=price;a.last_checked=new Date().toISOString();
@@ -132,8 +132,10 @@ export default async function (input, ctx) {
   const body=input.body&&typeof input.body==='object'?input.body:{};
   const query=input.query&&typeof input.query==='object'?input.query:{};
   const settings=()=>read(uid,'settings',{});
-  if(path==='/api/cats'||/^\\/api\\/cats\\/\\d+$/.test(path)){
-    const m=path.match(/^\\/api\\/cats\\/(\\d+)$/),cats=async()=>{const v=await read(uid,'cats',[]);return Array.isArray(v)?v:[];};
+  const catPrefix='/api/cats/';
+  if(path==='/api/cats'||path.startsWith(catPrefix)){
+    const idText=path.startsWith(catPrefix)?path.slice(catPrefix.length):'';
+    const m=idText&&Number.isInteger(Number(idText))?[null,idText]:null,cats=async()=>{const v=await read(uid,'cats',[]);return Array.isArray(v)?v:[];};
     if(method==='GET')return {cats:await cats()};
     if(method==='POST'){const name=String(body.name||'').trim().slice(0,40);if(!name)fail('invalid');const cs=await cats();if(cs.some(x=>x.name===name))fail('duplicate');const cat={id:cs.reduce((n,x)=>Math.max(n,x.id||0),0)+1,name,color:/^#[0-9a-fA-F]{6}$/.test(body.color||'')?body.color.toUpperCase():'#8B5CF6'};cs.push(cat);await write(uid,'cats',cs);return {ok:true,cat};}
     if(m){const id=Number(m[1]),cs=await cats(),cat=cs.find(x=>x.id===id);if(!cat)fail('not found',404);if(method==='PUT'){const name=String(body.name||'').trim().slice(0,40);if(!name)fail('invalid');if(cs.some(x=>x.id!==id&&x.name===name))fail('duplicate');cat.name=name;if(/^#[0-9a-fA-F]{6}$/.test(body.color||''))cat.color=body.color.toUpperCase();await write(uid,'cats',cs);return {ok:true,cat};}if(method==='DELETE'){await write(uid,'cats',cs.filter(x=>x.id!==id));const d=await read(uid,'alerts',{alerts:[]});for(const a of d.alerts||[])if(a.cat===id)a.cat=0;await write(uid,'alerts',d);return {ok:true};}}
