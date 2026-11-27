@@ -104,7 +104,7 @@ jobs:
           from pathlib import Path
           path = Path("wrangler.toml")
           content = path.read_text()
-          content = 'account_id = "' + os.environ["CF_ACCOUNT"] + '"\\n' + content
+          content = 'account_id = "' + os.environ["CF_ACCOUNT"] + '"\n' + content
           app_id = os.environ["TGCLOUD_TOKEN"].removeprefix("app").split(":", 1)[0]
           if not app_id.isdigit():
               raise SystemExit("Could not extract Telegram app ID from TGCLOUD_TOKEN")
