@@ -26,11 +26,10 @@ jobs:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
-          D1_ID: ${{ secrets.D1_DATABASE_ID || vars.D1_DATABASE_ID }}
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           set -e
-          for name in TGCLOUD_TOKEN CF_TOKEN CF_ACCOUNT D1_ID TG_TOKEN; do
+          for name in TGCLOUD_TOKEN CF_TOKEN CF_ACCOUNT TG_TOKEN; do
             if [ -z "${!name}" ]; then echo "::error::Missing GitHub secret/variable: $name"; exit 1; fi
           done
 
@@ -39,7 +38,6 @@ jobs:
 
       - name: Configure Worker resources
         env:
-          D1_ID: ${{ secrets.D1_DATABASE_ID || vars.D1_DATABASE_ID }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
         working-directory: worker
@@ -49,7 +47,6 @@ jobs:
           from pathlib import Path
           path = Path("wrangler.toml")
           content = path.read_text()
-          content = content.replace("SET_D1_DATABASE_ID_IN_GITHUB_VARIABLES", os.environ["D1_ID"])
           content = 'account_id = "' + os.environ["CF_ACCOUNT"] + '"\n' + content
           token = os.environ["TGCLOUD_TOKEN"]
           app_id = token.removeprefix("app").split(":", 1)[0]
@@ -75,12 +72,6 @@ jobs:
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Worker deployed: $URL"
-
-      - name: Apply D1 schema
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler d1 execute telegram-mini-alerts --remote --file=worker/schema.sql --config=worker/wrangler.toml
 
       - name: Configure Worker secrets
         env:
