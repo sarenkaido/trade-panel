@@ -900,7 +900,7 @@ function show(t){tab=t;const sec=isU(t)?'u':t;['a','s','p','g','k','w','c','u'].
  $('#fab').style.display=t==='c'?'none':'';$('#fab').textContent=isU(t)?'＋ نوت جدید':t==='a'?'＋ آلارم جدید':t==='s'?'＋ سناریو جدید':t==='p'?'＋ پوزیشن جدید':t==='g'?'＋ استراتژی جدید':t==='k'?'＋ تسک جدید':'＋ واچلیست جدید';
  if(t==='s'){if(Date.now()-_sAt>30000)loadS()}else if(t==='p'){if(Date.now()-_pAt>30000)loadP()}else if(t==='g'){if(Date.now()-_gAt>30000)loadG()}else if(t==='k'){if(Date.now()-_kAt>30000)loadK()}else  if(t==='w'){if(Date.now()-_wAt>30000)loadW()}else if(t==='a'&&Date.now()-_aAt>20000)refresh()}
 const TABS='aspgkwc';
-const STK=new Set(${JSON.stringify([...STOCK_TICKERS])});
+const STK=new Set(["AAPL","TSLA","NVDA","GOOGL","GOOG","MSFT","AMZN","AMD","META","NFLX","SPX","SPXL","BRK","JPM","V","DIS","PYPL","COIN","SQ","PLTR","SOFI","NIO","XPEV","LI","MSTR","BABA","INTC","UBER","ORCL","CRM","ADBE","QCOM","AVGO","MU","TSM","ASML","BA","KO","PEP","WMT","NKE","MCD","XOM","CVX","PFE","JNJ","UNH","HOOD","RBLX","SHOP","SNAP","ABNB","MARA","RIOT","CRCL","GME","AMC","SPY","QQQ","IWM"]);
 function fixCoin(){const i=$('#coin');let v=i.value.toUpperCase().replace(/[\s\/_-]/g,'');const m=/^([A-Z0-9]{1,12}?)(?:USDT)?(\.P)?$/.exec(v);if(m)v=m[1]+((m[2]||STK.has(m[1]))?'USDT.P':'');i.value=v}
 $('#coin').addEventListener('change',fixCoin);$('#coin').addEventListener('blur',fixCoin);
 document.querySelectorAll('.tb button[data-t]').forEach(b=>b.onclick=()=>{show(b.dataset.t);try{history.pushState(null,'','#'+b.dataset.t)}catch(e){}try{localStorage.setItem('tab',b.dataset.t)}catch(e){}scrollTo(0,0)});
