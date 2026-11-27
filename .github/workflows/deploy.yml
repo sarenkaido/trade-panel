@@ -1,25 +1,40 @@
-# هر بار که چیزی در شاخه‌ی پیش‌فرض پوش شود، ورکر «alert» خودکار روی Cloudflare دیپلوی می‌شود.
-# Secrets لازم (GitHub ← Settings ← Secrets and variables ← Actions):
-#   CLOUDFLARE_API_TOKEN ، CLOUDFLARE_ACCOUNT_ID ، KV_NAMESPACE_ID
-# Secret اختیاری: D1_DATABASE_ID (اگر بگذاری، دیتابیس D1 هم وصل می‌شود)
-name: Deploy to Cloudflare
+name: Deploy Trade Panel
+
 on:
   push:
-    branches: ["**"]   # فقط شاخه‌ی پیش‌فرض واقعاً دیپلوی می‌شود (شرط `if` پایین)
-    paths: ["worker.js", "wrangler.toml", ".github/workflows/deploy.yml"]
-  workflow_dispatch: {}   # دکمه‌ی «Run workflow» برای دیپلوی دستی
+    branches: ["Main"]
+    paths:
+      - "worker.js"
+      - "wrangler.toml"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/**"
+      - "tgcloud.jsonc"
+      - "tgcloud/**"
+      - "worker/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "انتخاب مقصد دیپلوی"
+        required: true
+        type: choice
+        default: cloudflare-worker
+        options:
+          - cloudflare-worker
+          - telegram-mini-app
 
 permissions:
-  contents: read   # کمترین دسترسی ممکن برای توکن خودکار گیت‌هاب
+  contents: read
 
 concurrency:
-  group: deploy
+  group: trade-panel-deploy-${{ github.event.inputs.target || 'cloudflare-worker' }}
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    # فقط از شاخه‌ی پیش‌فرض ریپو دیپلوی کن؛ اگر اسم شاخه عوض شد چیزی خراب نمی‌شود
-    if: github.event_name == 'workflow_dispatch' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+  deploy-cloudflare-worker:
+    if: github.event_name == 'push' || inputs.target == 'cloudflare-worker'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +46,7 @@ jobs:
         env:
           KV_ID: ${{ secrets.KV_NAMESPACE_ID }}
         run: |
-          if [ -z "$KV_ID" ]; then echo "::error::Secret KV_NAMESPACE_ID is missing (GitHub > Settings > Secrets and variables > Actions)"; exit 1; fi
+          if [ -z "$KV_ID" ]; then echo "::error::Secret KV_NAMESPACE_ID is missing"; exit 1; fi
           sed -i "s/PUT_YOUR_KV_NAMESPACE_ID_HERE/$KV_ID/" wrangler.toml
       - name: Attach D1 database (optional)
         env:
@@ -39,13 +54,101 @@ jobs:
         run: |
           if [ -n "$D1_ID" ]; then
             printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "alert-db"\ndatabase_id = "%s"\n' "$D1_ID" >> wrangler.toml
-            echo "D1 attached"
           else
             echo "D1_DATABASE_ID not set: using KV only"
           fi
-      - name: Deploy
+      - name: Deploy Cloudflare Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
+
+  deploy-telegram-mini-app:
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'telegram-mini-app'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate required configuration
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -e
+          for name in TGCLOUD_TOKEN CF_TOKEN CF_ACCOUNT TG_TOKEN; do
+            if [ -z "${!name}" ]; then echo "::error::Missing GitHub secret/variable: $name"; exit 1; fi
+          done
+      - name: Install dependencies
+        run: npm install
+      - name: Configure Telegram Alert Worker
+        env:
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        working-directory: worker
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path("wrangler.toml")
+          content = path.read_text()
+          content = 'account_id = "' + os.environ["CF_ACCOUNT"] + '"\\n' + content
+          app_id = os.environ["TGCLOUD_TOKEN"].removeprefix("app").split(":", 1)[0]
+          if not app_id.isdigit():
+              raise SystemExit("Could not extract Telegram app ID from TGCLOUD_TOKEN")
+          path.write_text(content.replace("APP_ID", app_id))
+          PY
+      - name: Deploy Telegram Alert Scheduler
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: worker
+        run: npx wrangler deploy
+      - name: Configure Telegram Worker secret
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: printf '%s' "$TELEGRAM_BOT_TOKEN" | npx wrangler secret put TELEGRAM_BOT_TOKEN --config=worker/wrangler.toml
+      - name: Build Mini App and validate inline JavaScript
+        run: npm run build
+      - name: Sync Telegram Serverless revision
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: npx tgcloud fetch
+      - name: Set Telegram app ID
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: |
+          APP_ID="${TGCLOUD_TOKEN#app}"
+          APP_ID="${APP_ID%%:*}"
+          if ! [[ "$APP_ID" =~ ^[0-9]+$ ]]; then echo "::error::Invalid TGCLOUD_TOKEN app id"; exit 1; fi
+          APP_ID="$APP_ID" python - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path("tgcloud/lib/config.js")
+          path.write_text(path.read_text().replace("APP_ID", os.environ["APP_ID"]))
+          PY
+      - name: Deploy Telegram Mini App
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: npx tgcloud push
+      - name: Apply Telegram Serverless schema
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: npx tgcloud migrate --yes
+      - name: Smoke test backup export and restore
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: |
+          set -euo pipefail
+          CTX="{ initData: { user: { id: ${GITHUB_RUN_ID}, first_name: \"BACKUP-CI\" } } }"
+          npx tgcloud run endpoints/api '{"method":"POST","path":"/api/watchlist","body":{"coin":"BACKUP-CHECK"}}' --ctx "$CTX"
+          BACKUP=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/backup"}' --ctx "$CTX")
+          echo "$BACKUP"
+          [[ "$BACKUP" == *'trade-panel-backup'* && "$BACKUP" == *'"email"'* ]] || { echo "::error::Backup export is missing expected data/settings"; exit 1; }
+          npx tgcloud run endpoints/api '{"method":"POST","path":"/api/backup/import","body":{"format":"trade-panel-backup","version":1,"data":{"alerts":{"alerts":[],"last_id":0},"cats":[],"watchlist":{"items":[{"id":1,"coin":"BACKUP-RESTORED","note":"","cat":0}],"last_id":1},"wcats":[],"scenario":{"items":[],"last_id":0},"scats":[],"positions":{"items":[],"last_id":0},"pcats":[],"strategies":{"items":[],"last_id":0},"gcats":[],"tasks":{"items":[],"last_id":0},"kcats":[],"tabs":{"tabs":[]},"settings":{"lang":"fa","email":"backup@example.invalid"}}}' --ctx "$CTX"
+          RESTORED=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/backup"}' --ctx "$CTX")
+          [[ "$RESTORED" == *'BACKUP-RESTORED'* && "$RESTORED" == *'backup@example.invalid'* ]] || { echo "::error::Backup restore verification failed"; exit 1; }
