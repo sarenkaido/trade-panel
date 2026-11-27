@@ -116,4 +116,4 @@ jobs:
           echo "$LIST"
           [[ "$LIST" == *'MINIAPP-CI-SMOKE'* ]] || { echo "::error::Watchlist read endpoint failed"; exit 1; }
           npx tgcloud run endpoints/api "{\"method\":\"DELETE\",\"path\":\"/api/watchlist/1\"}" --ctx "$CTX"
-          npx tgcloud run endpoints/cron "{\"userId\":${GITHUB_RUN_ID}}" --ctx '{ initData: { start_param: "worker-cron" } }'
+          npx tgcloud run endpoints/cron "{\"userId\":${GITHUB_RUN_ID}}" --ctx '{ initData: { start_param: "worker-cron", user: { id: 1 } } }'
