@@ -7,8 +7,8 @@ const reject = (message) => { throw new EndpointError(message, { code: 'FORBIDDE
 
 async function read(userId, key, fallback) {
   const row = await db.select().from(userState).where(and(eq(userState.userId,userId),eq(userState.key,key))).get();
-  if (!row) return structuredClone(fallback);
-  try { return JSON.parse(row.value); } catch { return structuredClone(fallback); }
+  if (!row) return fallback;
+  try { return JSON.parse(row.value); } catch { return fallback; }
 }
 async function write(userId,key,value) {
   await db.insert(userState).values({userId,key,value:JSON.stringify(value)})
