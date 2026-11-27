@@ -955,7 +955,8 @@ async function handleApi(request, env, url) {
         data[key] = {items,last_id:items.length};
       }
     }
-    data.settings = { lang: (await kvGetJSON(env, "settings", {})).lang === "en" ? "en" : "fa" };
+    const safeSettings = await kvGetJSON(env, "settings", {});
+    data.settings = { lang: safeSettings.lang === "en" ? "en" : "fa", email: typeof safeSettings.email === "string" ? safeSettings.email : "" };
     return jsonRes({ format:"trade-panel-backup", version:1, createdAt:new Date().toISOString(), source:"web", data });
   }
   if (M === "POST" && p === "/api/backup/import") {
@@ -970,6 +971,7 @@ async function handleApi(request, env, url) {
     for (const key of keys) await kvSetJSON(env,key,data[key]);
     const settings = await kvGetJSON(env,"settings",{});
     settings.lang = data.settings && data.settings.lang === "en" ? "en" : "fa";
+    if (data.settings && typeof data.settings.email === "string") { settings.email = data.settings.email.slice(0, 254); settings.verified = false; }
     await kvSetJSON(env,"settings",settings);
     await kvSetJSON(env,"reported_ids",[]);
     return jsonRes({ok:true});
@@ -2388,9 +2390,23 @@ $('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disable
  }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
  finally{b.disabled=false}};
 
+const BACKUP_LOCAL_KEYS=['calc','flt','wflt','sflt','pflt','gflt','kflt','tab','theme','lang'];
+function attachClientBackup(backup){
+ const values={};
+ for(const key of BACKUP_LOCAL_KEYS){try{const value=localStorage.getItem(key);if(value!==null)values[key]=value}catch(e){}}
+ backup.client={version:1,localStorage:values};
+ return backup;
+}
+function restoreClientBackup(backup){
+ const values=backup&&backup.client&&backup.client.version===1?backup.client.localStorage:null;
+ if(!values||typeof values!=='object'||Array.isArray(values))return false;
+ for(const key of Object.keys(values))if(!BACKUP_LOCAL_KEYS.includes(key)||typeof values[key]!=='string'||values[key].length>100000)throw new Error('بخش تنظیمات محلی بکاپ معتبر نیست');
+ for(const key of BACKUP_LOCAL_KEYS){if(Object.prototype.hasOwnProperty.call(values,key))localStorage.setItem(key,values[key]);else localStorage.removeItem(key)}
+ return true;
+}
 async function downloadBackup(){
  try{
-  const backup=await api('GET','/api/backup');
+  const backup=attachClientBackup(await api('GET','/api/backup'));
   const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
   const href=URL.createObjectURL(blob),a=document.createElement('a');
   a.href=href;a.download='trade-panel-backup-'+new Date().toISOString().slice(0,10)+'.json';
@@ -2406,8 +2422,10 @@ $('#backup-in').onclick=async()=>{
  const btn=$('#backup-in');btn.disabled=true;
  try{
   const parsed=JSON.parse(await selectedBackupFile.text());
+  if(parsed.client)restoreClientBackup(parsed);
   await api('POST','/api/backup/import',parsed);
-  say('بازیابی با موفقیت انجام شد. صفحه برای بارگذاری اطلاعات جدید تازه‌سازی می‌شود.');
+  if(parsed.client)restoreClientBackup(parsed);
+  say('بازیابی اطلاعات سرور و تنظیمات محلی با موفقیت انجام شد. صفحه تازه‌سازی می‌شود.');
   location.reload();
  }catch(e){say('بازیابی انجام نشد ('+e.message+')');btn.disabled=false}
 };
