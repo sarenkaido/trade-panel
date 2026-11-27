@@ -694,7 +694,7 @@ function trNode(n){if(n.nodeType===3){const v=T(n.nodeValue);if(v!==n.nodeValue)
 if(LANG==='en'){document.documentElement.lang='en';document.documentElement.dir='ltr';document.title=T(document.title);trNode(document.body);
  new MutationObserver(ms=>{for(const m of ms){if(m.type==='characterData')trNode(m.target);else m.addedNodes.forEach(trNode)}}).observe(document.body,{childList:true,subtree:true,characterData:true})}
 function syncLang(){api('POST','/api/lang',{lang:LANG}).catch(()=>{})}
-function setLang(l){try{localStorage.setItem('lang',l)}catch(e){}fetch('/api/lang',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:l})}).catch(()=>{}).finally(()=>location.reload())}
+function setLang(l){try{localStorage.setItem('lang',l)}catch(e){}api('POST','/api/lang',{lang:l}).catch(()=>{}).finally(()=>location.reload())}
 const $=s=>document.querySelector(s);
 function applyTheme(){let m='system';try{m=localStorage.getItem('theme')||'system'}catch(e){}if(m!=='light'&&m!=='dark')m='system';const t=m==='system'?(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;const h=document.documentElement;h.setAttribute('data-theme',t);h.setAttribute('data-tmode',m);try{document.querySelectorAll('meta[name="theme-color"]').forEach(x=>x.remove());const mm=document.createElement('meta');mm.setAttribute('name','theme-color');mm.setAttribute('content',t==='light'?'#f1f2fa':'#0a0c12');document.head.appendChild(mm)}catch(e){}}
 applyTheme();
