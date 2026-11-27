@@ -197,3 +197,26 @@ Free, open source (MIT) and runs on **your own** infrastructure — no central s
 > ⚠️ Send only on the listed network, and double-check the address against this page before sending. A ⭐ star on the repo is just as appreciated.
 
 </div>
+
+---
+
+## بکاپ کامل و انتخاب مقصد دیپلوی
+
+از بخش «بکاپ و پشتیبانی» می‌توانی فایل JSON بگیری و آن را در هر دو نسخه‌ی سایت و Telegram Mini App بازیابی کنی. بکاپ شامل آلارم‌ها، دسته‌بندی‌ها، واچ‌لیست، سناریوها، پوزیشن‌ها، استراتژی‌ها، تسک‌ها، تب‌های سفارشی، زبان و تنظیمات محلی مرورگر (ماشین‌حساب، فیلترها، تم و تب فعال) است.
+
+- فایل بکاپ بین نسخه‌ی سایت و Mini App قابل جابه‌جایی است.
+- اطلاعات ورود، رمز عبور، توکن ربات و کلیدهای API عمداً داخل بکاپ قرار نمی‌گیرند.
+- ایمیل تنظیم‌شده منتقل می‌شود، اما بعد از بازیابی وضعیت تأیید آن باید دوباره بررسی شود.
+- قبل از بازیابی، از اطلاعات مقصد نیز بکاپ بگیر؛ بازیابی داده‌های مقصد را جایگزین می‌کند.
+
+### انتخاب مقصد دیپلوی از GitHub Actions
+
+در GitHub به **Actions → Deploy Trade Panel → Run workflow** برو و مقصد را انتخاب کن:
+
+- **cloudflare-worker**: نسخه‌ی وب فعلی روی Cloudflare Worker منتشر می‌شود.
+- **telegram-mini-app**: سورس Mini App ساخته و روی Telegram Serverless منتشر می‌شود و Worker زمان‌بندی آلارم Mini App نیز به‌روزرسانی می‌شود.
+
+برای مقصد Mini App این Secrets/Variables باید در GitHub تنظیم شده باشند: `TGCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` و `TELEGRAM_BOT_TOKEN`. برای مقصد Cloudflare Worker نیز `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` و `KV_NAMESPACE_ID` لازم‌اند؛ `D1_DATABASE_ID` اختیاری است.
+
+تغییرات `worker.js` و `wrangler.toml` در شاخه‌ی `Main` به‌صورت خودکار مقصد Cloudflare Worker را دیپلوی می‌کنند. انتشار Mini App از طریق انتخاب دستی workflow انجام می‌شود.
+
