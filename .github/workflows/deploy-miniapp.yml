@@ -56,22 +56,12 @@ jobs:
           path.write_text(content)
           PY
 
-      - name: Deploy Alert Worker and capture URL
-        id: worker
+      - name: Deploy Alert Scheduler Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: worker
-        run: |
-          set -o pipefail
-          npx wrangler deploy 2>&1 | tee /tmp/wrangler-deploy.log
-          URL=$(grep -Eo 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/wrangler-deploy.log | tail -n 1)
-          if [ -z "$URL" ]; then
-            echo "::error::Could not determine Worker URL from Wrangler output."
-            exit 1
-          fi
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "Worker deployed: $URL"
+        run: npx wrangler deploy
 
       - name: Configure Worker secrets
         env:
@@ -82,8 +72,6 @@ jobs:
           printf '%s' "$TELEGRAM_BOT_TOKEN" | npx wrangler secret put TELEGRAM_BOT_TOKEN --config=worker/wrangler.toml
 
       - name: Build Mini App
-        env:
-          WORKER_API_URL: ${{ steps.worker.outputs.url }}
         run: npm run build
 
       - name: Set Telegram Mini App URL
