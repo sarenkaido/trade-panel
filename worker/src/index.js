@@ -36,7 +36,7 @@ async function verifyInitData(initData, botToken) {
 async function priceFor(symbol) {
   const clean = symbol.replace(/[^A-Z0-9]/g, '');
   const urls = [
-    ['https://api.bybit.com/v5/market/tickers?category=spot&symbol=' + clean, d => d?.result?.list?.[0]?.lastPrice],
+    ['https://api.bybit.com/v5/market/tickers?category=spot&symbol=' + clean + 'USDT', d => d?.result?.list?.[0]?.lastPrice],
     ['https://api.binance.com/api/v3/ticker/price?symbol=' + clean + 'USDT', d => d?.price],
     ['https://www.okx.com/api/v5/market/ticker?instId=' + clean + '-USDT', d => d?.data?.[0]?.last],
   ];
@@ -95,7 +95,7 @@ async function apiHandler(request, env) {
   if (match && request.method === 'PATCH') {
     const body = await request.json();
     if (typeof body.active !== 'boolean') return new Response(JSON.stringify({error:'مقدار active نامعتبر است.'}), {status:400,headers:{...JSON_HEADERS,...cors}});
-    const result = await env.DB.prepare('UPDATE alerts SET active=? WHERE id=? AND user_id=?').bind(body.active ? 1 : 0,match[1],userId).run();
+    const result = await env.DB.prepare('UPDATE alerts SET active=?, triggered_at=CASE WHEN ?=1 THEN NULL ELSE triggered_at END WHERE id=? AND user_id=?').bind(body.active ? 1 : 0,body.active ? 1 : 0,match[1],userId).run();
     return new Response(JSON.stringify({ok:true,changes:result.meta?.changes || 0}), {headers:{...JSON_HEADERS,...cors}});
   }
   if (match && request.method === 'DELETE') {
