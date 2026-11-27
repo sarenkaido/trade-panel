@@ -73,7 +73,8 @@ export default async function (_input,ctx) {
       }
       alert.prev_price=price;alert.last_price=price;alert.last_checked=new Date().toISOString();
     }
-    if(changed||pending.length)await write(user.userId,'alerts',data);\n    await write(user.userId,'last_cron',{t:Date.now(),p:pending.length,m:'',e:failed?'Telegram notification errors':'',n:null});
+    if(changed||pending.length)await write(user.userId,'alerts',data);
+    await write(user.userId,'last_cron',{t:Date.now(),p:pending.length,m:'',e:failed?'Telegram notification errors':'',n:null});
   }
   return {ok:true,users:users.length,checked,triggered,failed};
 }
