@@ -126,3 +126,8 @@ jobs:
         env:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
         run: npx tgcloud migrate --yes
+
+      - name: Smoke test Telegram Serverless alert scheduler
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: npx tgcloud run endpoints/cron '{}' --ctx '{ initData: { start_param: "worker-cron" } }'
