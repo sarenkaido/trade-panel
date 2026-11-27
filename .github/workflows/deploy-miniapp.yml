@@ -110,13 +110,10 @@ jobs:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
         run: |
           set -euo pipefail
-          CTX='{ initData: { user: { id: 987654321, first_name: "CI" } } }'
-          CREATE=$(npx tgcloud run endpoints/api '{"method":"POST","path":"/api/watchlist/","body":{"coin":"MINIAPP-CI-SMOKE"}}' --ctx "$CTX")
-          echo "$CREATE"
-          ID=$(printf '%s' "$CREATE" | grep -Eo '"id"[[:space:]]*:[[:space:]]*[0-9]+' | tail -1 | grep -Eo '[0-9]+')
-          if [ -z "$ID" ]; then echo "::error::Watchlist create did not return an ID"; exit 1; fi
+          CTX="{ initData: { user: { id: ${GITHUB_RUN_ID}, first_name: \"CI\" } } }"
+          npx tgcloud run endpoints/api '{"method":"POST","path":"/api/watchlist/","body":{"coin":"MINIAPP-CI-SMOKE"}}' --ctx "$CTX"
           LIST=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/watchlist"}' --ctx "$CTX")
           echo "$LIST"
           [[ "$LIST" == *'MINIAPP-CI-SMOKE'* ]] || { echo "::error::Watchlist read endpoint failed"; exit 1; }
-          npx tgcloud run endpoints/api "{\"method\":\"DELETE\",\"path\":\"/api/watchlist/$ID\"}" --ctx "$CTX"
-          npx tgcloud run endpoints/cron '{"userId":987654321}' --ctx '{ initData: { start_param: "worker-cron" } }'
+          npx tgcloud run endpoints/api "{\"method\":\"DELETE\",\"path\":\"/api/watchlist/1\"}" --ctx "$CTX"
+          npx tgcloud run endpoints/cron "{\"userId\":${GITHUB_RUN_ID}}" --ctx '{ initData: { start_param: "worker-cron" } }'
