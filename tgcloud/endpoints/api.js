@@ -40,6 +40,31 @@ async function priceFor(symbol) {
   }
   return null;
 }
+async function checkUserAlerts(uid) {
+  const d=await read(uid,'alerts',{alerts:[],last_id:0}),alerts=Array.isArray(d.alerts)?d.alerts:[];
+  const pending=alerts.filter(a=>(a.targets||[]).some(t=>!(a.triggered||[]).includes(t.id)));
+  const symbols=[...new Set(pending.map(a=>a.coin))],prices=new Map();
+  await Promise.all(symbols.map(async s=>prices.set(s,await priceFor(s))));
+  let sent=0,changed=false;
+  for(const a of pending){
+    const price=prices.get(a.coin);if(price==null)continue;
+    const entry=a.entry_price??a.ref_price??null;
+    for(const t of a.targets||[]){
+      const tid=t.id||0;if((a.triggered||[]).includes(tid))continue;
+      const dir=(parseNote(t.note)['جهت']||'').toLowerCase(),level=Number(t.price);
+      let hit=false,kind='🔔';
+      if(dir==='long'){if(entry!=null&&level>=entry){hit=price>=level;kind='✅ TP';}else if(entry!=null){hit=price<=level;kind='🛑 SL';}else hit=price>=level;}
+      else if(dir==='short'){if(entry!=null&&level>entry){hit=price>=level;kind='🛑 SL';}else if(entry!=null){hit=price<=level;kind='✅ TP';}else hit=price<=level;}
+      else{const prev=Number(a.prev_price);hit=price===level||(Number.isFinite(prev)&&((prev<level&&price>=level)||(prev>level&&price<=level)));}
+      if(!hit)continue;
+      try{await api.sendMessage({chat_id:uid,text:(await read(uid,'settings',{})).lang==='en'?kind+' '+a.coin+' reached '+level+' (current '+price+')':kind+' هشدار '+a.coin+'\\nقیمت فعلی: '+price+'\\nقیمت هدف: '+level});a.triggered=a.triggered||[];a.triggered.push(tid);sent++;changed=true;}
+      catch(e){console.warn('Immediate alert delivery failed',uid,a.id,e?.description||e?.message||String(e));}
+    }
+    a.prev_price=price;a.last_price=price;a.last_checked=new Date().toISOString();
+  }
+  if(changed||pending.length)await write(uid,'alerts',d);
+  return {checked:pending.length,triggered:sent};
+}
 function targetsFrom(body) {
   const direction = ['long','short'].includes(body.direction) ? body.direction : '';
   return (Array.isArray(body.targets)?body.targets:[]).slice(0,10)
@@ -127,7 +152,7 @@ export default async function (input, ctx) {
   if(path==='/api/tg'&&method==='GET')return {connected:true,hasToken:true,bot:'',viaEnv:true};
   if(path.startsWith('/api/tg/')&&method==='POST')return {connected:true,hasToken:true,bot:'',viaEnv:true};
   if(path==='/api/status'&&method==='GET')return {t:0,p:0,m:'',e:'',now:Date.now(),s:'Telegram Serverless'};
-  if(path==='/api/check-now'&&method==='POST')return {ok:true};
+  if(path==='/api/check-now'&&method==='POST')return {ok:true,...await checkUserAlerts(uid)};
   if(path==='/api/prices'&&method==='GET'){
     const coins=[...new Set(String(query.coins||'').toUpperCase().split(',').filter(Boolean))].slice(0,40),out={};
     await Promise.all(coins.map(async c=>{out[c]=await priceFor(c);}));
