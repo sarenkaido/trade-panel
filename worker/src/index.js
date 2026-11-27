@@ -16,7 +16,7 @@ async function signedInitData(botToken) {
 
 async function runTelegramServerlessCron(env) {
   if (!env.TGCLOUD_APP_URL || !env.TELEGRAM_BOT_TOKEN) throw new Error('Missing Telegram Serverless scheduler configuration');
-  const authorization = 'tma ' + await signedInitData(env.TELEGRAM_BOT_TOKEN);
+  const authorization = 'TMA ' + await signedInitData(env.TELEGRAM_BOT_TOKEN);
   const response = await fetch(env.TGCLOUD_APP_URL + '/api/cron', {
     method: 'POST',
     headers: { Authorization: authorization, 'Content-Type': 'application/json' },
