@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#10141d">
+  <title>هشدار قیمت</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div><span class="eyebrow">TRADE TOOLS</span><h1>هشدار قیمت</h1><p id="welcome">آلارم‌هایت را مدیریت کن</p></div>
+      <button id="refresh" class="icon-btn" aria-label="به‌روزرسانی">↻</button>
+    </header>
+    <section class="summary">
+      <div><span>کل آلارم‌ها</span><strong id="total">—</strong></div>
+      <div><span>فعال</span><strong id="active">—</strong></div>
+    </section>
+    <section class="panel">
+      <div class="section-head"><h2>آلارم جدید</h2><span class="hint">قیمت به تتر</span></div>
+      <form id="alert-form">
+        <label>نماد<input name="symbol" placeholder="BTC یا ETH" maxlength="20" required autocomplete="off"></label>
+        <div class="two">
+          <label>جهت<select name="direction"><option value="above">بالاتر از قیمت</option><option value="below">پایین‌تر از قیمت</option></select></label>
+          <label>قیمت هدف<input name="target" type="number" min="0.00000001" step="any" placeholder="95000" required></label>
+        </div>
+        <button class="primary" type="submit">＋ ساخت آلارم</button>
+      </form>
+    </section>
+    <section class="list-section">
+      <div class="section-head"><h2>آلارم‌های من</h2><span id="status" class="status">در حال اتصال…</span></div>
+      <div id="alerts" class="alerts"><div class="empty">در حال دریافت اطلاعات…</div></div>
+    </section>
+    <footer>اتصال امن از طریق حساب تلگرام شما</footer>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

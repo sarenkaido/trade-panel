@@ -1,7 +1,7 @@
-.dev.vars
+node_modules/
+dist/
+.tgcloud/
+.wrangler/
 .env
 .env.*
-.wrangler/
-node_modules/
-*.log
-.DS_Store
+!.env.example
