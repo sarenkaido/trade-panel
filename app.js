@@ -1,6 +1,23 @@
 const tg = window.Telegram?.WebApp;
 tg?.ready();
-tg?.expand();
+try {
+  tg?.setHeaderColor?.('#080d1b');
+  tg?.setBackgroundColor?.('#080d1b');
+  tg?.setBottomBarColor?.('#080d1b');
+  tg?.expand?.();
+  if (typeof tg?.requestFullscreen === 'function' && !tg.isFullscreen) {
+    const result = tg.requestFullscreen();
+    if (result?.catch) result.catch(() => tg.expand?.());
+  }
+} catch (error) { console.debug('Telegram fullscreen fallback', error); }
+
+function syncTelegramViewport() {
+  const height = tg?.viewportStableHeight || tg?.viewportHeight;
+  if (height) document.documentElement.style.setProperty('--tg-viewport-height', height + 'px');
+}
+syncTelegramViewport();
+tg?.onEvent?.('viewportChanged', syncTelegramViewport);
+tg?.onEvent?.('fullscreenChanged', syncTelegramViewport);
 
 const API_BASE = (window.WORKER_API_URL || '').replace(/\/$/, '');
 const $ = (id) => document.getElementById(id);
