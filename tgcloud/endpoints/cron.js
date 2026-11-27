@@ -48,7 +48,8 @@ async function priceFor(symbol) {
     ['https://api.bitget.com/api/v2/spot/market/tickers?symbol='+c+'USDT',d=>d?.data?.[0]?.lastPr],
     ['https://api.binance.com/api/v3/ticker/price?symbol='+c+'USDT',d=>d?.price],
   ];
-  const values=await Promise.all(sources.map(([url,pick])=>tryPrice(url,pick)));\n  return values.find(value=>value!==null)??null;
+  const values=await Promise.all(sources.map(([url,pick])=>tryPrice(url,pick)));
+  return values.find(value=>value!==null)??null;
 }
 async function getCandles(coin) {
   const c=(splitCoin(coin)||{base:String(coin||'').toUpperCase()}).base;
