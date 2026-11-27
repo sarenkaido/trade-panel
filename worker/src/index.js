@@ -124,12 +124,37 @@ async function runAlerts(env) {
   }
 }
 
+async function callTelegramServerlessCron(env) {
+  if (!env.TGCLOUD_APP_URL || !env.TELEGRAM_BOT_TOKEN) throw new Error('Telegram Serverless cron configuration is missing');
+  const params = new URLSearchParams();
+  params.set('auth_date', String(Math.floor(Date.now() / 1000)));
+  params.set('query_id', 'worker_cron_' + Date.now());
+  params.set('start_param', 'worker-cron');
+  params.set('user', JSON.stringify({id: 1, first_name: 'Scheduler', username: 'miniapp_scheduler'}));
+  const check = [...params.entries()].sort(([a],[b]) => a.localeCompare(b)).map(([k,v]) => k + '=' + v).join('\\n');
+  const encoder = new TextEncoder();
+  const secretKey = await crypto.subtle.importKey('raw', encoder.encode('WebAppData'), {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
+  const secret = await crypto.subtle.sign('HMAC', secretKey, encoder.encode(env.TELEGRAM_BOT_TOKEN));
+  const dataKey = await crypto.subtle.importKey('raw', secret, {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
+  const signature = new Uint8Array(await crypto.subtle.sign('HMAC', dataKey, encoder.encode(check)));
+  const hash = [...signature].map(b => b.toString(16).padStart(2,'0')).join('');
+  params.set('hash', hash);
+  const response = await fetch(env.TGCLOUD_APP_URL.replace(/\\/$/, '') + '/api/cron', {
+    method: 'POST',
+    headers: {'Authorization': 'tma ' + btoa(params.toString()), 'Content-Type': 'application/json'},
+    body: '{}'
+  });
+  const result = await response.text();
+  if (!response.ok) throw new Error('Telegram Serverless cron HTTP ' + response.status + ': ' + result.slice(0,240));
+  console.log('Telegram Serverless cron:', result.slice(0,500));
+}
+
 export default {
   async fetch(request, env) {
     try { return await apiHandler(request, env); }
     catch (error) { console.log('request failed', String(error)); return json({error:'خطای داخلی سرور'},500); }
   },
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(runAlerts(env).catch(error => console.log('cron failed', String(error))));
+    ctx.waitUntil(callTelegramServerlessCron(env).catch(error => console.log('cron failed', String(error))));
   }
 };
