@@ -6,13 +6,6 @@ on:
     paths:
       - "worker.js"
       - "wrangler.toml"
-      - "index.html"
-      - "package.json"
-      - "package-lock.json"
-      - "scripts/**"
-      - "tgcloud.jsonc"
-      - "tgcloud/**"
-      - "worker/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
     inputs:
