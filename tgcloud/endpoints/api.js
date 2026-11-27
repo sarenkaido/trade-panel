@@ -124,7 +124,7 @@ export default async function (input, ctx) {
     const keys=['alerts','cats','watchlist','wcats','scenario','scats','positions','pcats','strategies','gcats','tasks','kcats','tabs'];
     const defaults={alerts:{alerts:[],last_id:0},cats:[],watchlist:{items:[],last_id:0},wcats:[],scenario:{items:[],last_id:0},scats:[],positions:{items:[],last_id:0},pcats:[],strategies:{items:[],last_id:0},gcats:[],tasks:{items:[],last_id:0},kcats:[],tabs:{tabs:[]}};
     const data={};for(const key of keys)data[key]=await read(uid,key,defaults[key]);
-    data.settings={lang:(await settings()).lang==='en'?'en':'fa'};
+    const safeSettings=await settings();data.settings={lang:safeSettings.lang==='en'?'en':'fa',email:typeof safeSettings.email==='string'?safeSettings.email:''};
     return {format:'trade-panel-backup',version:1,createdAt:new Date().toISOString(),source:'telegram-mini-app',data};
   }
   if(path==='/api/backup/import'&&method==='POST'){
@@ -136,7 +136,7 @@ export default async function (input, ctx) {
     if(!Array.isArray(data.alerts.alerts)||!Array.isArray(data.tabs.tabs))fail('محتوای بکاپ معتبر نیست');
     for(const key of ['watchlist','scenario','positions','strategies','tasks'])if(!Array.isArray(data[key].items))fail('محتوای بکاپ معتبر نیست: '+key);
     for(const key of ['alerts','cats','watchlist','wcats','scenario','scats','positions','pcats','strategies','gcats','tasks','kcats','tabs'])await write(uid,key,data[key]);
-    const st=await settings();st.lang=data.settings&&data.settings.lang==='en'?'en':'fa';await write(uid,'settings',st);
+    const st=await settings();st.lang=data.settings&&data.settings.lang==='en'?'en':'fa';if(data.settings&&typeof data.settings.email==='string'){st.email=data.settings.email.slice(0,254);st.verified=false;}await write(uid,'settings',st);
     await write(uid,'reported_ids',[]);
     return {ok:true};
   }
