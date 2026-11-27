@@ -4,7 +4,7 @@
     "source": "dist",
     "spa": true,
     "headers": [
-      { "path": "/*", "set": { "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" } }
+      { "path": "/*", "set": { "Referrer-Policy": "no-referrer" } }
     ]
   }
 }
