@@ -23,7 +23,7 @@ function splitCoin(raw) {
 }
 async function tryPrice(url,pick) {
   try {
-    const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0'}});
+    const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(3500)});
     if(!r.ok)return null;
     const v=Number(pick(await r.json()));
     return Number.isFinite(v)&&v>0?v:null;
@@ -48,8 +48,7 @@ async function priceFor(symbol) {
     ['https://api.bitget.com/api/v2/spot/market/tickers?symbol='+c+'USDT',d=>d?.data?.[0]?.lastPr],
     ['https://api.binance.com/api/v3/ticker/price?symbol='+c+'USDT',d=>d?.price],
   ];
-  for(const [url,pick] of sources){const value=await tryPrice(url,pick);if(value!==null)return value;}
-  return null;
+  const values=await Promise.all(sources.map(([url,pick])=>tryPrice(url,pick)));\n  return values.find(value=>value!==null)??null;
 }
 async function getCandles(coin) {
   const c=(splitCoin(coin)||{base:String(coin||'').toUpperCase()}).base;
@@ -58,7 +57,7 @@ async function getCandles(coin) {
     ['https://api.bybit.com/v5/market/kline?category=spot&symbol='+c+'USDT&interval=1&limit=3',d=>d?.result?.list],
     ['https://www.okx.com/api/v5/market/candles?instId='+c+'-USDT&bar=1m&limit=3',d=>d?.data],
   ];
-  for(const [url,pick] of sources){try{const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0'}});if(!r.ok)continue;const rows=pick(await r.json());if(Array.isArray(rows)&&rows.length)return rows;}catch{}}
+  for(const [url,pick] of sources){try{const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(2500)});if(!r.ok)continue;const rows=pick(await r.json());if(Array.isArray(rows)&&rows.length)return rows;}catch{}}
   return null;
 }
 function candleRange(rows,createdAt) {
