@@ -104,7 +104,7 @@ export default async function (input, ctx) {
   await db.insert(miniUsers).values({userId:uid,firstName:user.first_name||'',username:user.username||'',createdAt:Math.floor(Date.now()/1000)})
     .onConflictDoUpdate({target:miniUsers.userId,set:{firstName:user.first_name||'',username:user.username||''}}).run();
   const method=String(input.method||'GET').toUpperCase();
-  const path=String(input.path||'/');
+  const path=(String(input.path||'/').replace(/\\/+$/,'')||'/');
   const body=input.body&&typeof input.body==='object'?input.body:{};
   const query=input.query&&typeof input.query==='object'?input.query:{};
   const settings=()=>read(uid,'settings',{});
