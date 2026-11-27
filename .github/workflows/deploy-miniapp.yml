@@ -74,6 +74,11 @@ jobs:
       - name: Build Mini App
         run: npm run build
 
+      - name: Sync deployed Telegram Serverless revision
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: npx tgcloud fetch
+
       - name: Set Telegram Mini App URL
         env:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
@@ -90,12 +95,6 @@ jobs:
           path = Path("tgcloud/lib/config.js")
           path.write_text(path.read_text().replace("APP_ID", os.environ["APP_ID"]))
           PY
-
-      - name: Sync deployed Telegram Serverless revision
-        env:
-          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
-        run: npx tgcloud fetch
-
       - name: Deploy Mini App to Telegram Serverless
         env:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
