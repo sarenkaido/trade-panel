@@ -7,15 +7,16 @@ for (const file of ['index.html', 'app.js', 'styles.css']) {
   await cp(file, `dist/${file}`);
 }
 
-const workerUrl = (process.env.WORKER_API_URL || '').replace(/\\/$/, '');
+const configuredUrl = process.env.WORKER_API_URL || '';
+const workerUrl = configuredUrl.endsWith('/')
+  ? configuredUrl.slice(0, -1)
+  : configuredUrl;
+
 if (!workerUrl) {
   throw new Error('WORKER_API_URL must be supplied by the deployment workflow.');
 }
 
-await writeFile(
-  'dist/config.js',
-  `window.WORKER_API_URL = ${JSON.stringify(workerUrl)};\\n`,
-  'utf8'
-);
+const config = 'window.WORKER_API_URL = ' + JSON.stringify(workerUrl) + String.fromCharCode(10);
+await writeFile('dist/config.js', config, 'utf8');
 
-console.log(`Mini App built for API: ${workerUrl}`);
+console.log('Mini App built for API: ' + workerUrl);
