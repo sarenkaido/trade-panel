@@ -19,9 +19,105 @@
 
 ---
 
-## راه‌اندازی
+## راه‌اندازی و انتخاب روش دیپلوی
 
-برای نصب پروژه، ابتدا یک کپی از مخزن در حساب GitHub خودت بساز و سپس یکی از دو روش زیر را انتخاب کن. انتشار برنامه از طریق GitHub Actions انجام می‌شود؛ هر بار خودت مقصد انتشار را انتخاب می‌کنی.
+برای نصب، ابتدا مشخص کن کدام نسخه را می‌خواهی و ترجیح می‌دهی چطور آن را منتشر کنی. **چهار مسیر برای دیپلوی وجود دارد:**
+
+| نسخه موردنظر | روش انتشار | مناسب چه کسی است؟ |
+|---|---|---|
+| نسخه وب روی Cloudflare Worker | GitHub Actions | می‌خواهی با انتخاب مقصد در GitHub، انتشار خودکار انجام شود |
+| Telegram Mini App | GitHub Actions | می‌خواهی Mini App و Worker زمان‌بندی آلارم‌ها با یک اجرای workflow منتشر شوند |
+| نسخه وب روی Cloudflare Worker | دستی از داشبورد Cloudflare | نمی‌خواهی از GitHub Actions استفاده کنی و ترجیح می‌دهی کد را در ویرایشگر Cloudflare قرار بدهی |
+| Telegram Mini App | دستی از رابط گرافیکی BotFather و Cloudflare | می‌خواهی ماژول‌ها و فایل‌های Mini App را از پنل‌های گرافیکی تنظیم و منتشر کنی |
+
+**کدام راهنما را دنبال کنم؟**
+- اگر GitHub Actions برایت مناسب است، از بخش «دیپلوی با GitHub Actions» استفاده کن.
+- اگر نمی‌خواهی با GitHub Actions کار کنی، مستقیم به بخش «نصب دستی بدون GitHub Actions» برو.
+- برای نسخه وب فقط مراحل Cloudflare را انجام بده؛ برای نسخه تلگرام فقط مراحل Mini App را. برای اجرای هر دو نسخه باید هر دو مسیر را جداگانه راه‌اندازی کنی.
+
+[English version / نسخه انگلیسی](README.en.md) · [ساخت Fork از پروژه](https://github.com/sarenkaido/trade-panel/fork)
+
+## دیپلوی با GitHub Actions
+
+در این روش باید یک Fork از مخزن در حساب GitHub خودت بسازی. سپس برای هر انتشار، مقصد را از workflow انتخاب می‌کنی؛ Push کردن کد به‌تنهایی چیزی را Deploy نمی‌کند.
+
+### ۱. آماده‌سازی مخزن شخصی
+
+1. وارد حساب GitHub خودت شو و روی **Fork** بزن: [ساخت Fork از پروژه](https://github.com/sarenkaido/trade-panel/fork).
+2. مخزن Forkشده را باز کن و از تب **Actions**، در صورت نمایش پیام غیرفعال بودن گردش‌کارها، گزینه‌ی **I understand my workflows, go ahead and enable them** را بزن.
+3. وارد **Settings → Secrets and variables → Actions** شو. در مراحل بعد، مقادیر لازم را در همین قسمت و فقط در مخزن خودت اضافه می‌کنی.
+4. هیچ توکن، رمز یا شناسه‌ی حساب خودت را در مخزن عمومی اصلی یا در فایل‌های کد قرار نده.
+
+### ۲. نصب نسخه وب روی Cloudflare
+
+این روش پنل را به شکل یک سایت مستقل در مرورگر در دسترس قرار می‌دهد.
+
+**الف) ساخت فضای ذخیره‌سازی**
+1. در [Cloudflare](https://dash.cloudflare.com/) یک حساب بساز یا وارد حساب خودت شو.
+2. از بخش **Storage & Databases → KV** یک Namespace بساز؛ مثلاً نام آن را `trade-panel` بگذار.
+3. شناسه‌ی Namespace (Namespace ID) را کپی کن.
+
+**ب) ساخت API Token**
+1. در Cloudflare به **My Profile → API Tokens** برو و یک Token بساز.
+2. دسترسی لازم برای انتشار و مدیریت Worker را به آن بده و آن را به حساب خودت محدود کن.
+3. مقدار Token و **Account ID** حساب Cloudflare را بردار.
+
+**ج) افزودن مقادیر به GitHub**
+در مخزن Forkشده به **Settings → Secrets and variables → Actions → New repository secret** برو و این سه Secret را بساز:
+
+| نام Secret | مقداری که باید وارد کنی |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | API Token ساخته‌شده در Cloudflare |
+| `CLOUDFLARE_ACCOUNT_ID` | Account ID حساب Cloudflare |
+| `KV_NAMESPACE_ID` | شناسه‌ی KV Namespace مرحله‌ی قبل |
+
+اتصال D1 اختیاری است؛ اگر از D1 استفاده می‌کنی، شناسه‌ی دیتابیس را با نام `D1_DATABASE_ID` به‌عنوان Secret اضافه کن. در غیر این صورت نیازی به آن نیست.
+
+**د) انتشار**
+1. در مخزن خودت به **Actions → Deploy Trade Panel** برو.
+2. روی **Run workflow** کلیک کن.
+3. مقصد **فقط نسخه وب — Cloudflare Worker** را انتخاب کن و اجرای workflow را تأیید کن.
+4. پس از سبز شدن مراحل انتشار، در Cloudflare وارد **Workers & Pages** شو و آدرس Worker ساخته‌شده را باز کن.
+
+**هـ) راه‌اندازی اولیه سایت**
+1. آدرس Worker را در مرورگر باز کن و ثبت‌نام را شروع کن.
+2. برای ارسال کد تأیید ایمیل، یک حساب در [Resend](https://resend.com/) بساز و API Key آن را طبق راهنمایی که پنل هنگام ثبت‌نام نشان می‌دهد وارد کن. محدودیت‌های ارسال در حساب رایگان Resend را بررسی کن.
+3. پس از تأیید ایمیل وارد پنل شو. اتصال ربات تلگرام از تنظیمات پنل اختیاری است و فقط برای دریافت اعلان‌ها استفاده می‌شود.
+
+### ۳. نصب Telegram Mini App
+
+این روش پنل را داخل تلگرام باز می‌کند. برای آن به ربات تلگرام، پروژه‌ی Telegram Mini App در TGCLOUD و Cloudflare برای اجرای بررسی دوره‌ای آلارم‌ها نیاز داری.
+
+**الف) ساخت ربات تلگرام**
+1. در تلگرام [@BotFather](https://t.me/BotFather) را باز کن و دستور `/newbot` را بفرست.
+2. نام و شناسه‌ی ربات را انتخاب کن و Bot Token را در جای امن نگه دار.
+
+**ب) ساخت برنامه در TGCLOUD**
+1. در سرویس [TGCLOUD](https://tgcloud.ai/) حساب بساز و یک پروژه‌ی Telegram Serverless / Mini App ایجاد کن.
+2. توکن دسترسی همان پروژه را از پنل TGCLOUD بردار. این توکن باید مربوط به همین برنامه باشد، نه Bot Token تلگرام.
+
+**ج) آماده‌سازی Cloudflare**
+1. یک حساب Cloudflare داشته باش.
+2. یک API Token با دسترسی انتشار Worker بساز و Account ID حساب را بردار.
+
+**د) افزودن مقادیر به GitHub**
+در مخزن Forkشده به **Settings → Secrets and variables → Actions** برو و این مقادیر را اضافه کن:
+
+| نام | نوع | مقدار |
+|---|---|---|
+| `TGCLOUD_TOKEN` | Secret | توکن پروژه‌ی TGCLOUD |
+| `CLOUDFLARE_API_TOKEN` | Secret | API Token کلادفلر |
+| `TELEGRAM_BOT_TOKEN` | Secret | توکن ربات ساخته‌شده با BotFather |
+| `CLOUDFLARE_ACCOUNT_ID` | Secret یا Variable | Account ID کلادفلر |
+
+**هـ) انتشار Mini App**
+1. به **Actions → Deploy Trade Panel → Run workflow** برو.
+2. مقصد **نسخه تلگرام — Telegram Mini App** را انتخاب کن و workflow را اجرا کن.
+3. صبر کن تمام مراحل مربوط به انتشار Mini App و Worker زمان‌بندی آلارم‌ها با موفقیت تمام شوند.
+4. ربات خودت را در تلگرام باز کن و **Start** را بزن؛ سپس دکمه‌ی Mini App را برای باز کردن پنل انتخاب کن.
+
+در این روش ورود با حساب تلگرام انجام می‌شود و ثبت‌نام ایمیلی نسخه وب لازم نیست.
+
 
 ### ۱. آماده‌سازی مخزن شخصی
 
