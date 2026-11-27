@@ -49,7 +49,7 @@ jobs:
           path = Path("wrangler.toml")
           content = path.read_text()
           content = content.replace("SET_D1_DATABASE_ID_IN_GITHUB_VARIABLES", os.environ["D1_ID"])
-          content += '\naccount_id = "' + os.environ["CF_ACCOUNT"] + '"\n'
+          content = 'account_id = "' + os.environ["CF_ACCOUNT"] + '"\n' + content
           path.write_text(content)
           PY
 
