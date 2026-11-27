@@ -41,6 +41,7 @@ jobs:
         env:
           D1_ID: ${{ secrets.D1_DATABASE_ID || vars.D1_DATABASE_ID }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
         working-directory: worker
         run: |
           python - <<'PY'
