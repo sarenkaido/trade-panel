@@ -116,4 +116,26 @@ jobs:
           echo "$LIST"
           [[ "$LIST" == *'MINIAPP-CI-SMOKE'* ]] || { echo "::error::Watchlist read endpoint failed"; exit 1; }
           npx tgcloud run endpoints/api "{\"method\":\"DELETE\",\"path\":\"/api/watchlist/1\"}" --ctx "$CTX"
+          for SECTION in scenario positions strategies tasks; do
+            npx tgcloud run endpoints/api "{\"method\":\"POST\",\"path\":\"/api/$SECTION/\",\"body\":{\"title\":\"MINIAPP-CI-$SECTION\",\"text\":\"smoke\"}}" --ctx "$CTX"
+            LIST=$(npx tgcloud run endpoints/api "{\"method\":\"GET\",\"path\":\"/api/$SECTION\"}" --ctx "$CTX")
+            echo "$LIST"
+            [[ "$LIST" == *"MINIAPP-CI-$SECTION"* ]] || { echo "::error::$SECTION CRUD smoke test failed"; exit 1; }
+            npx tgcloud run endpoints/api "{\"method\":\"DELETE\",\"path\":\"/api/$SECTION/1\"}" --ctx "$CTX"
+          done
+          npx tgcloud run endpoints/api '{"method":"POST","path":"/api/alerts/","body":{"coin":"BTC","direction":"long","entry":50000,"targets":[{"price":55000,"note":"CI target"}],"ch":["tg"]}}' --ctx "$CTX"
+          ALERTS=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/alerts?x=2"}' --ctx "$CTX")
+          echo "$ALERTS"
+          [[ "$ALERTS" == *'BTC'* ]] || { echo "::error::Alert create/read smoke test failed"; exit 1; }
+          npx tgcloud run endpoints/api '{"method":"DELETE","path":"/api/alerts/1"}' --ctx "$CTX"
+          npx tgcloud run endpoints/api '{"method":"POST","path":"/api/cats","body":{"name":"MINIAPP-CI-CAT"}}' --ctx "$CTX"
+          CATS=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/cats"}' --ctx "$CTX")
+          [[ "$CATS" == *'MINIAPP-CI-CAT'* ]] || { echo "::error::Alert categories smoke test failed"; exit 1; }
+          npx tgcloud run endpoints/api '{"method":"DELETE","path":"/api/cats/1"}' --ctx "$CTX"
+          npx tgcloud run endpoints/api '{"method":"POST","path":"/api/tabs","body":{"title":"MINIAPP-CI-TAB"}}' --ctx "$CTX"
+          TABS=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/tabs"}' --ctx "$CTX")
+          [[ "$TABS" == *'MINIAPP-CI-TAB'* ]] || { echo "::error::Custom tabs smoke test failed"; exit 1; }
+          npx tgcloud run endpoints/api '{"method":"GET","path":"/api/settings"}' --ctx "$CTX"
+          npx tgcloud run endpoints/api '{"method":"GET","path":"/api/status"}' --ctx "$CTX"
+          npx tgcloud run endpoints/api '{"method":"POST","path":"/api/check-now"}' --ctx "$CTX"
           npx tgcloud run endpoints/cron "{\"userId\":${GITHUB_RUN_ID}}" --ctx '{ initData: { start_param: "worker-cron", user: { id: 1 } } }'
