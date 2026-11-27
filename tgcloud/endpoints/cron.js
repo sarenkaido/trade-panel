@@ -78,7 +78,7 @@ function numberText(value) {
 }
 
 export default async function (_input,ctx) {
-  if(ctx.initData?.start_param!=='worker-cron')reject('Forbidden');
+  if(ctx.initData?.start_param!=='worker-cron'||Number(ctx.initData?.user?.id)!==1)reject('Forbidden');
   const allUsers=await db.select().from(miniUsers).all();
   const requestedUser=Number(_input?.userId)||0;
   const users=requestedUser?allUsers.filter(user=>user.userId===requestedUser):allUsers;
