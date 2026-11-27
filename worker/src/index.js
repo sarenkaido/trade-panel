@@ -139,7 +139,7 @@ async function callTelegramServerlessCron(env) {
   const signature = new Uint8Array(await crypto.subtle.sign('HMAC', dataKey, encoder.encode(check)));
   const hash = [...signature].map(b => b.toString(16).padStart(2,'0')).join('');
   params.set('hash', hash);
-  const response = await fetch(env.TGCLOUD_APP_URL.replace(/\\/$/, '') + '/api/cron', {
+  const response = await fetch(env.TGCLOUD_APP_URL + '/api/cron', {
     method: 'POST',
     headers: {'Authorization': 'tma ' + btoa(params.toString()), 'Content-Type': 'application/json'},
     body: '{}'
