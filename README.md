@@ -19,12 +19,12 @@ Mini App مستقیماً به API ورکر وصل می‌شود. ورکر ام�
 - `TGCLOUD_TOKEN`: توکن CLI از BotFather → ربات → Serverless → CLI Access.
 - `CLOUDFLARE_API_TOKEN`: توکن Cloudflare با دسترسی ویرایش و Deploy کردن Workers و مدیریت D1.
 - `TELEGRAM_BOT_TOKEN`: توکن Bot API ربات.
-- `WORKER_API_SECRET`: یک رشته تصادفی بلند برای محافظت از endpointهای مدیریتی Worker (برای فراخوانی‌های server-to-server آینده).
+
 
 ### Variables
 - `CLOUDFLARE_ACCOUNT_ID`: شناسه حساب Cloudflare.
 - `D1_DATABASE_ID`: شناسه دیتابیس D1 مخصوص همین Mini App.
-- `WORKER_API_URL`: آدرس Worker پس از اولین Deploy، مانند `https://trade-alerts-mini.<subdomain>.workers.dev`.
+- `WORKER_API_URL`: آدرس Worker، مانند `https://telegram-mini-alerts.<subdomain>.workers.dev`.
 - `TELEGRAM_BOT_USERNAME`: نام ربات بدون @ (صرفاً برای نمایش/راهنما).
 
 > هیچ‌کدام از توکن‌ها را در کد، فایل‌های تنظیمات یا چت قرار نده.
