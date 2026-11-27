@@ -102,6 +102,7 @@ export default async function (_input,ctx) {
       const hi=rg?Math.max(rg.hi,price):price,lo=rg?Math.min(rg.lo,price):price;
       let entry=alert.entry_price!=null?alert.entry_price:alert.ref_price,entryHealed=false,needsPrev=false;
       if(entry==null){const levels=(alert.targets||[]).map(t=>Number(t.price));entry=levels.length>=2?(Math.min(...levels)+Math.max(...levels))/2:price;entryHealed=true;}
+      let deliveryFailed=false;
       for(const target of alert.targets||[]){
         const tid=target.id||0;if((alert.triggered||[]).includes(tid))continue;
         const level=Number(target.price),direction=directionOf(target.note);
@@ -133,9 +134,9 @@ export default async function (_input,ctx) {
           alert.triggered=alert.triggered||[];alert.triggered.push(tid);
           alert.last_triggered=alert.last_triggered||{};alert.last_triggered[String(tid)]=now;
           changed=true;triggered++;
-        }catch(e){failed++;console.warn('Alert delivery failed',user.userId,alert.id,e?.description||e?.message||String(e));}
+        }catch(e){deliveryFailed=true;failed++;console.warn('Alert delivery failed',user.userId,alert.id,e?.description||e?.message||String(e));}
       }
-      if(needsPrev)alert.prev_price=price;
+      if(needsPrev&&!deliveryFailed)alert.prev_price=price;
       alert.last_price=price;alert.last_checked=new Date().toISOString();
       if(entryHealed&&alert.entry_price==null&&alert.ref_price==null)alert.ref_price=entry;
       changed=true;
