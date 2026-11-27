@@ -5,11 +5,6 @@ compatibility_date = "2026-11-01"
 [triggers]
 crons = ["* * * * *"]
 
-[[d1_databases]]
-binding = "DB"
-database_name = "telegram-mini-alerts"
-database_id = "SET_D1_DATABASE_ID_IN_GITHUB_VARIABLES"
-
 [vars]
 APP_ENV = "production"
 TGCLOUD_APP_URL = "https://appAPP_ID.tgcloud.ai"
