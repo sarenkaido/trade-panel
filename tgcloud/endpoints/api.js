@@ -119,6 +119,28 @@ export default async function (input, ctx) {
   if(path==='/api/auth/state'&&method==='GET')return {registered:true,loggedIn:true,user:user.username||String(uid),mail:false,legacy:false};
   if(['/api/logout','/api/login','/api/auth/confirm'].includes(path)&&method==='POST')return {ok:true};
   if(path==='/api/auth/code'||path==='/api/auth/change')fail('ورود و رمز عبور با حساب تلگرام مدیریت می‌شود');
+
+  if(path==='/api/backup'&&method==='GET'){
+    const keys=['alerts','cats','watchlist','wcats','scenario','scats','positions','pcats','strategies','gcats','tasks','kcats','tabs'];
+    const defaults={alerts:{alerts:[],last_id:0},cats:[],watchlist:{items:[],last_id:0},wcats:[],scenario:{items:[],last_id:0},scats:[],positions:{items:[],last_id:0},pcats:[],strategies:{items:[],last_id:0},gcats:[],tasks:{items:[],last_id:0},kcats:[],tabs:{tabs:[]}};
+    const data={};for(const key of keys)data[key]=await read(uid,key,defaults[key]);
+    data.settings={lang:(await settings()).lang==='en'?'en':'fa'};
+    return {format:'trade-panel-backup',version:1,createdAt:new Date().toISOString(),source:'telegram-mini-app',data};
+  }
+  if(path==='/api/backup/import'&&method==='POST'){
+    const data=body.data;
+    if(body.format!=='trade-panel-backup'||body.version!==1||!data||typeof data!=='object'||Array.isArray(data))fail('فرمت فایل بکاپ معتبر نیست');
+    if(JSON.stringify(body).length>2000000)fail('حجم فایل بکاپ بیش از حد مجاز است',413);
+    for(const key of ['cats','wcats','scats','pcats','gcats','kcats'])if(!Array.isArray(data[key]))fail('بخش نامعتبر در بکاپ: '+key);
+    for(const key of ['alerts','watchlist','scenario','positions','strategies','tasks','tabs'])if(!data[key]||typeof data[key]!=='object'||Array.isArray(data[key]))fail('بخش نامعتبر در بکاپ: '+key);
+    if(!Array.isArray(data.alerts.alerts)||!Array.isArray(data.tabs.tabs))fail('محتوای بکاپ معتبر نیست');
+    for(const key of ['watchlist','scenario','positions','strategies','tasks'])if(!Array.isArray(data[key].items))fail('محتوای بکاپ معتبر نیست: '+key);
+    for(const key of ['alerts','cats','watchlist','wcats','scenario','scats','positions','pcats','strategies','gcats','tasks','kcats','tabs'])await write(uid,key,data[key]);
+    const st=await settings();st.lang=data.settings&&data.settings.lang==='en'?'en':'fa';await write(uid,'settings',st);
+    await write(uid,'reported_ids',[]);
+    return {ok:true};
+  }
+
   if(path==='/api/lang'&&method==='POST'){const st=await settings();st.lang=body.lang==='en'?'en':'fa';await write(uid,'settings',st);return {ok:true};}
   if(path==='/api/settings'&&method==='GET'){const st=await settings();return {email:st.email||'',verified:!!st.verified,provider:false,lang:st.lang||'fa'};}
   if(path==='/api/settings'&&method==='POST'){const st=await settings();Object.assign(st,body);await write(uid,'settings',st);return {ok:true};}
