@@ -105,8 +105,19 @@ jobs:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
         run: npx tgcloud migrate --yes
 
-      - name: Smoke test Telegram Serverless alert scheduler
+      - name: Smoke test Telegram Serverless API and CRUD
         env:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
         run: |
+          set -euo pipefail
+          CTX='{ initData: { user: { id: 987654321, first_name: "CI" } } }'
+          CREATE=$(npx tgcloud run endpoints/api '{"method":"POST","path":"/api/watchlist/","body":{"coin":"MINIAPP-CI-SMOKE"}}' --ctx "$CTX")
+          echo "$CREATE"
+          [[ "$CREATE" == *'"ok":true'* ]] || { echo "::error::Watchlist create endpoint failed"; exit 1; }
+          LIST=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/watchlist"}' --ctx "$CTX")
+          echo "$LIST"
+          [[ "$LIST" == *'MINIAPP-CI-SMOKE'* ]] || { echo "::error::Watchlist read endpoint failed"; exit 1; }
+          DELETE=$(npx tgcloud run endpoints/api '{"method":"DELETE","path":"/api/watchlist/1"}' --ctx "$CTX")
+          echo "$DELETE"
+          [[ "$DELETE" == *'"ok":true'* ]] || { echo "::error::Watchlist delete endpoint failed"; exit 1; }
           npx tgcloud run endpoints/cron '{}' --ctx '{ initData: { start_param: "worker-cron" } }'
