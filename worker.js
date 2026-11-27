@@ -944,7 +944,7 @@ async function handleApi(request, env, url) {
         if (kind === "w") {
           for (const line of old.split("\n")) {
             const value = line.trim(); if (!value) continue;
-            const match = value.match(/^([A-Za-z0-9]{1,12})\\s*(.*)$/);
+            const match = value.match(/^([A-Za-z0-9]{1,12})\s*(.*)$/);
             items.push({id:items.length+1,coin:(match?match[1]:value.slice(0,12)).toUpperCase(),note:(match?match[2]:"").slice(0,10000),cat:0});
             if (items.length >= 300) break;
           }
