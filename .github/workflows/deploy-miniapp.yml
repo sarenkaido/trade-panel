@@ -135,6 +135,14 @@ jobs:
           npx tgcloud run endpoints/api '{"method":"POST","path":"/api/tabs","body":{"title":"MINIAPP-CI-TAB"}}' --ctx "$CTX"
           TABS=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/tabs"}' --ctx "$CTX")
           [[ "$TABS" == *'MINIAPP-CI-TAB'* ]] || { echo "::error::Custom tabs smoke test failed"; exit 1; }
+          BACKUP=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/backup"}' --ctx "$CTX")
+          echo "$BACKUP"
+          [[ "$BACKUP" == *'trade-panel-backup'* ]] || { echo "::error::Backup export failed"; exit 1; }
+          npx tgcloud run endpoints/api '{"method":"POST","path":"/api/backup/import","body":{"format":"trade-panel-backup","version":1,"data":{"alerts":{"alerts":[],"last_id":0},"cats":[],"watchlist":{"items":[{"id":1,"coin":"BACKUP-CI-SMOKE","note":"","cat":0}],"last_id":1},"wcats":[],"scenario":{"items":[],"last_id":0},"scats":[],"positions":{"items":[],"last_id":0},"pcats":[],"strategies":{"items":[],"last_id":0},"gcats":[],"tasks":{"items":[],"last_id":0},"kcats":[],"tabs":{"tabs":[]},"settings":{"lang":"fa"}}}' --ctx "$CTX"
+          BACKUP_LIST=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/watchlist"}' --ctx "$CTX")
+          [[ "$BACKUP_LIST" == *'BACKUP-CI-SMOKE'* ]] || { echo "::error::Backup import did not restore data"; exit 1; }
+          BACKUP_AFTER=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/backup"}' --ctx "$CTX")
+          [[ "$BACKUP_AFTER" == *'BACKUP-CI-SMOKE'* ]] || { echo "::error::Backup export after restore failed"; exit 1; }
           npx tgcloud run endpoints/api '{"method":"GET","path":"/api/settings"}' --ctx "$CTX"
           npx tgcloud run endpoints/api '{"method":"GET","path":"/api/status"}' --ctx "$CTX"
           npx tgcloud run endpoints/api '{"method":"POST","path":"/api/check-now"}' --ctx "$CTX"
