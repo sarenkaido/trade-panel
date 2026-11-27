@@ -130,7 +130,7 @@ export default async function (input, ctx) {
   if(path==='/api/tg'&&method==='GET'){let bot='';try{bot=(await api.getMe()).username||'';}catch{}return {connected:true,hasToken:true,bot,viaEnv:true};}
   if(path.startsWith('/api/tg/')&&method==='POST'){let bot='';try{bot=(await api.getMe()).username||'';}catch{}return {connected:true,hasToken:true,bot,viaEnv:true};}
   if(path==='/api/status'&&method==='GET'){const st=await read(uid,'last_cron',{t:0,p:0,m:'',e:'',n:null});return {...st,now:Date.now(),s:'Telegram Serverless'};}
-  if(path==='/api/check-now'&&method==='POST')return {ok:true,...await runCron({}, {initData:{start_param:'worker-cron'}})};
+  if(path==='/api/check-now'&&method==='POST')return {ok:true,...await runCron({userId:uid}, {initData:{start_param:'worker-cron'}})};
   if(path==='/api/prices'&&method==='GET'){
     const coins=[...new Set(String(query.coins||'').toUpperCase().split(',').filter(Boolean))].slice(0,40),out={};
     await Promise.all(coins.map(async c=>{out[c]=await priceFor(c);}));
