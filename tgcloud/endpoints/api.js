@@ -153,7 +153,7 @@ export default async function (input, ctx) {
   if(path.startsWith('/api/email/'))fail('ارسال ایمیل در این نسخه فعال نیست');
   if(path==='/api/tg'&&method==='GET')return {connected:true,hasToken:true,bot:'',viaEnv:true};
   if(path.startsWith('/api/tg/')&&method==='POST')return {connected:true,hasToken:true,bot:'',viaEnv:true};
-  if(path==='/api/status'&&method==='GET')return {t:0,p:0,m:'',e:'',now:Date.now(),s:'Telegram Serverless'};
+  if(path==='/api/status'&&method==='GET'){const st=await read(uid,'last_cron',{t:0,p:0,m:'',e:'',n:null});return {...st,now:Date.now(),s:'Telegram Serverless'};}
   if(path==='/api/check-now'&&method==='POST')return {ok:true,...await checkUserAlerts(uid)};
   if(path==='/api/prices'&&method==='GET'){
     const coins=[...new Set(String(query.coins||'').toUpperCase().split(',').filter(Boolean))].slice(0,40),out={};
@@ -163,7 +163,7 @@ export default async function (input, ctx) {
   if(path==='/api/alerts'&&method==='GET'){
     const d=await read(uid,'alerts',{alerts:[],last_id:0}),cs=await read(uid,'cats',[]),st=await settings();
     const out={alerts:d.alerts||[],cats:Array.isArray(cs)?cs:[]};
-    if(query.x){out.status={t:0,p:0,m:'',e:'',now:Date.now(),s:'Telegram Serverless'};if(query.x==='2')out.settings={email:st.email||'',verified:!!st.verified,provider:false};}
+    if(query.x){const status=await read(uid,'last_cron',{t:0,p:0,m:'',e:'',n:null});out.status={...status,now:Date.now(),s:'Telegram Serverless'};if(query.x==='2')out.settings={email:st.email||'',verified:!!st.verified,provider:false};}
     return out;
   }
   if(path==='/api/alerts'&&method==='POST'){
