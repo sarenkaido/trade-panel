@@ -930,6 +930,34 @@ async function handleApi(request, env, url) {
 
   if (!loggedIn) return jsonRes({ error: "unauthorized" }, 401);
 
+
+  if (M === "GET" && p === "/api/backup") {
+    const keys = ["alerts","cats","watchlist","wcats","scenario","scats","positions","pcats","strategies","gcats","tasks","kcats","tabs"];
+    const defaults = { alerts:{alerts:[],last_id:0}, cats:[], watchlist:{items:[],last_id:0}, wcats:[], scenario:{items:[],last_id:0}, scats:[], positions:{items:[],last_id:0}, pcats:[], strategies:{items:[],last_id:0}, gcats:[], tasks:{items:[],last_id:0}, kcats:[], tabs:{tabs:[]} };
+    const data = {};
+    for (const key of keys) data[key] = await kvGetJSON(env, key, defaults[key]);
+    data.settings = { lang: (await kvGetJSON(env, "settings", {})).lang === "en" ? "en" : "fa" };
+    return jsonRes({ format:"trade-panel-backup", version:1, createdAt:new Date().toISOString(), source:"web", data });
+  }
+  if (M === "POST" && p === "/api/backup/import") {
+    const b = await body(), data = b && b.data;
+    if (b.format !== "trade-panel-backup" || b.version !== 1 || !data || typeof data !== "object" || Array.isArray(data)) return jsonRes({error:"invalid backup format"},400);
+    if (JSON.stringify(b).length > 2_000_000) return jsonRes({error:"backup is too large"},413);
+    const arrays = ["cats","wcats","scats","pcats","gcats","kcats"];
+    const objects = ["alerts","watchlist","scenario","positions","strategies","tasks","tabs"];
+    for (const key of arrays) if (!Array.isArray(data[key])) return jsonRes({error:"invalid backup section: "+key},400);
+    for (const key of objects) if (!data[key] || typeof data[key] !== "object" || Array.isArray(data[key])) return jsonRes({error:"invalid backup section: "+key},400);
+    if (!Array.isArray(data.alerts.alerts) || !Array.isArray(data.tabs.tabs)) return jsonRes({error:"invalid backup content"},400);
+    for (const key of ["watchlist","scenario","positions","strategies","tasks"]) if (!Array.isArray(data[key].items)) return jsonRes({error:"invalid backup content: "+key},400);
+    const keys = ["alerts","cats","watchlist","wcats","scenario","scats","positions","pcats","strategies","gcats","tasks","kcats","tabs"];
+    for (const key of keys) await kvSetJSON(env,key,data[key]);
+    const settings = await kvGetJSON(env,"settings",{});
+    settings.lang = data.settings && data.settings.lang === "en" ? "en" : "fa";
+    await kvSetJSON(env,"settings",settings);
+    await kvSetJSON(env,"reported_ids",[]);
+    return jsonRes({ok:true});
+  }
+
   if (M === "POST" && p === "/api/lang") {
     const l = (await body()).lang === "en" ? "en" : "fa";
     const st = await kvGetJSON(env, "settings", {});
@@ -1882,7 +1910,7 @@ html[dir=ltr] .tb button.on{box-shadow:inset 0 -2px 0 var(--acc)}
 </div></div>
 <div class="sh" id="ss" role="dialog" aria-modal="true"><div class="pn">
 <div class="pnh">تنظیمات</div>
-<div class="seg sst" id="sst"><button data-p="n" class="on">🔔 اعلان‌ها</button><button data-p="l">📋 لاگ</button><button data-p="a">👤 حساب</button></div>
+<div class="seg sst" id="sst"><button data-p="n" class="on">🔔 اعلان‌ها</button><button data-p="l">📋 لاگ</button><button data-p="a">👤 حساب</button><button data-p="b">💾 بکاپ</button></div>
 <div class="sp on" data-p="n">
 <div class="sg">
 <div class="sgh"><b>✉️ ایمیل</b><span id="emst" class="st"></span></div>
@@ -1925,6 +1953,20 @@ html[dir=ltr] .tb button.on{box-shadow:inset 0 -2px 0 var(--acc)}
 <button class="lk" id="acs">تغییر رمز</button>
 </div>
 <button class="lk" id="out" style="width:100%;color:var(--short)">خروج از حساب</button>
+</div>
+
+<div class="sp" data-p="b">
+<div class="sg">
+<div class="sgh"><b>💾 پشتیبان‌گیری و بازیابی</b></div>
+<div class="st" style="margin:0 0 8px">از اطلاعات آلارم‌ها، دسته‌بندی‌ها، واچ‌لیست، سناریوها، پوزیشن‌ها، استراتژی‌ها، تسک‌ها و تب‌های دلخواه فایل بکاپ می‌گیرد. این فایل را می‌توانی بین سایت و Mini App جابه‌جا کنی.</div>
+<button class="go" id="backup-out">دانلود فایل بکاپ</button>
+</div>
+<div class="sg">
+<div class="sgh"><b>بازیابی از فایل بکاپ</b></div>
+<div class="st" style="margin:0 0 8px">بازیابی، اطلاعات فعلی همین پنل را با اطلاعات فایل جایگزین می‌کند. قبل از آن از اطلاعات فعلی بکاپ بگیر.</div>
+<input id="backup-file" type="file" accept=".json,application/json">
+<button class="lk" id="backup-in" disabled style="width:100%">بازیابی اطلاعات از فایل انتخاب‌شده</button>
+</div>
 </div>
 <button class="lk" id="ssx" style="width:100%;color:var(--mut)">بستن</button>
 </div></div>
@@ -2328,6 +2370,31 @@ $('#aes').onclick=async()=>{const b=$('#aes'),em=$('#ae').value.trim();b.disable
   }
  }catch(e){const m=String(e.message);say(m.includes('wrong password')?'رمز فعلی اشتباه است.':m.includes('wrong code')?'کد اشتباه است.':m.includes('key required')?'کلید API سرویس ایمیل را وارد کن.':m.includes('not allowed')?'این ایمیل مجاز نیست.':m.includes('same email')?'این همان ایمیل فعلی است.':'انجام نشد ('+m+')')}
  finally{b.disabled=false}};
+
+async function downloadBackup(){
+ try{
+  const backup=await api('GET','/api/backup');
+  const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
+  const href=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=href;a.download='trade-panel-backup-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(href),1500);
+ }catch(e){say('ساخت بکاپ انجام نشد ('+e.message+')')}
+}
+$('#backup-out').onclick=downloadBackup;
+let selectedBackupFile=null;
+$('#backup-file').onchange=e=>{selectedBackupFile=e.target.files&&e.target.files[0]||null;$('#backup-in').disabled=!selectedBackupFile};
+$('#backup-in').onclick=async()=>{
+ if(!selectedBackupFile)return;
+ if(!confirm('هشدار: اطلاعات فعلی این پنل با اطلاعات فایل بکاپ جایگزین می‌شود. قبل از ادامه از اطلاعات فعلی بکاپ گرفته‌ای؟'))return;
+ const btn=$('#backup-in');btn.disabled=true;
+ try{
+  const parsed=JSON.parse(await selectedBackupFile.text());
+  await api('POST','/api/backup/import',parsed);
+  say('بازیابی با موفقیت انجام شد. صفحه برای بارگذاری اطلاعات جدید تازه‌سازی می‌شود.');
+  location.reload();
+ }catch(e){say('بازیابی انجام نشد ('+e.message+')');btn.disabled=false}
+};
+
 function setSP(p){document.querySelectorAll('#sst button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));document.querySelectorAll('#ss .sp').forEach(x=>x.classList.toggle('on',x.dataset.p===p))}
 document.querySelectorAll('#sst button').forEach(b=>b.onclick=()=>setSP(b.dataset.p));
 async function checkLegacy(){try{const r=await api('GET','/api/auth/state');if(r.loggedIn)syncLang();if(r.loggedIn&&r.legacy){setSP('a');$('#ss').classList.add('on');loadUser();loadTg();loadSettings();say('حساب تو هنوز با نام کاربری ساخته شده. لطفاً در بخش «حساب» یک ایمیل ثبت کن.')}}catch(e){}}
