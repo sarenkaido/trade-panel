@@ -136,67 +136,73 @@
 
 > این روش فقط برای نسخه وب است. فایل `worker.js` به‌تنهایی Telegram Mini App را نصب نمی‌کند.
 
-#### روش دستی B — Telegram Mini App بدون GitHub Actions
+#### روش دستی B — Telegram Mini App با رابط گرافیکی BotFather
 
-در این روش نیازی به GitHub Actions یا افزودن Secret به مخزن نیست؛ فایل‌ها روی کامپیوتر خودت آماده و با CLI رسمی TGCLOUD منتشر می‌شوند. تنظیمات BotFather و Cloudflare را می‌توانی از داشبوردهای گرافیکی انجام بدهی.
+برای این مسیر لازم نیست GitHub Actions یا CLI انتشار TGCLOUD را اجرا کنی. خود BotFather بخش Serverless دارد که از طریق آن می‌توانی کدهای سمت سرور، دیتابیس و فایل‌های Mini App را با رابط گرافیکی مدیریت کنی. برای این پروژه فقط یک Worker زمان‌بندی‌شده در Cloudflare هم لازم است.
 
-**۱) دریافت پروژه و نصب ابزارها**
-1. از [صفحه پروژه](https://github.com/sarenkaido/trade-panel) گزینه‌ی **Code → Download ZIP** را بزن و فایل را از حالت فشرده خارج کن.
-2. [Node.js نسخه 22](https://nodejs.org/) را نصب کن.
-3. ترمینال را در پوشه‌ی اصلی پروژه باز کن و اجرا کن:
+**۱) ساخت ربات و فعال‌سازی Serverless**
+1. در تلگرام [@BotFather](https://t.me/BotFather) را باز کن و با دستور `/newbot` یک ربات بساز.
+2. ربات را از فهرست **My Bots** انتخاب کن.
+3. وارد بخش **Serverless** شو و آن را فعال کن.
 
-```bash
-npm install
-```
+**۲) آماده‌کردن فایل‌های پروژه**
+1. از [مخزن پروژه](https://github.com/sarenkaido/trade-panel) گزینه‌ی **Code → Download ZIP** را بزن و فایل را استخراج کن.
+2. برای رابط Mini App، فایل `index.html` در ریشه‌ی پروژه همان فایل نهایی قابل میزبانی است؛ لازم نیست آن را کامپایل کنی. آن را برای بارگذاری در بخش Mini App Files آماده نگه دار.
+3. فایل‌های زیر را از پوشه‌ی `tgcloud` پروژه باز کن. در مراحل بعد محتوای هر فایل را در ماژول هم‌نام داخل BotFather قرار می‌دهی:
+   - `tgcloud/schema.js`
+   - `tgcloud/handlers/message.js`
+   - `tgcloud/endpoints/api.js`
+   - `tgcloud/endpoints/cron.js`
+   - `tgcloud/endpoints/profile.js`
+   - `tgcloud/lib/config.js`
 
-**۲) ساخت ربات و فعال‌سازی Telegram Serverless**
-1. در تلگرام [@BotFather](https://t.me/BotFather) را باز کن و با دستور `/newbot` ربات بساز.
-2. در تنظیمات همان ربات، قابلیت **Serverless** را فعال کن و از بخش دسترسی CLI، توکن پروژه را دریافت کن. این مقدار با Bot Token معمولی متفاوت است.
-3. توکن CLI را فقط روی کامپیوتر خودت نگه دار؛ آن را در فایل پروژه یا مخزن عمومی ننویس.
+**۳) ثبت ماژول‌ها در BotFather**
+در صفحه‌ی ربات به **Serverless** برگرد و فایل‌ها را در بخش‌های مربوط قرار بده:
 
-**۳) آماده‌سازی Cloudflare**
-1. در داشبورد Cloudflare یک API Token با دسترسی ویرایش Workers بساز و Account ID را از صفحه حساب بردار.
-2. فایل `worker/wrangler.toml` را با ویرایشگر متن باز کن.
-3. خط زیر را در ابتدای فایل اضافه کن و مقدار نمونه را با Account ID خودت عوض کن:
+| بخش در BotFather | نام ماژول | فایل پروژه |
+|---|---|---|
+| Database / Schema | `schema.js` | `tgcloud/schema.js` |
+| Handlers | `message` | `tgcloud/handlers/message.js` |
+| Endpoints | `api` | `tgcloud/endpoints/api.js` |
+| Endpoints | `cron` | `tgcloud/endpoints/cron.js` |
+| Endpoints | `profile` | `tgcloud/endpoints/profile.js` |
+| Library | `config` | `tgcloud/lib/config.js` |
 
-```toml
-account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
-```
+برای هر ماژول، محتوای فایل متناظر را کامل جایگزین کن و Save بزن. نام ماژول‌ها و مسیرها را دقیقاً مطابق جدول نگه دار؛ فایل‌ها یکدیگر را با همین نام‌ها وارد می‌کنند.
 
-4. در همان فایل، عبارت `APP_ID` در مقدار `TGCLOUD_APP_URL` باید با شناسه‌ی برنامه‌ی TGCLOUD جایگزین شود. این شناسه از توکن CLI که با `app` شروع می‌شود قابل تشخیص است؛ بخش عددی بعد از `app` و قبل از `:` همان App ID است.
+**۴) تنظیم آدرس Mini App**
+1. شناسه‌ی برنامه را از بخش Serverless / CLI Access توکن دسترسی برنامه بردار؛ توکن را لازم نیست جایی منتشر کنی. App ID بخش عددی بعد از `app` و قبل از `:` است.
+2. در ماژول Library با نام `config`، مقدار `APP_ID` در آدرس `https://appAPP_ID.tgcloud.ai/` را با شناسه‌ی خودت جایگزین کن.
+3. تغییر را Save کن.
 
-**۴) انتشار Worker زمان‌بندی آلارم‌ها**
-در ترمینال، از پوشه‌ی اصلی پروژه اجرا کن:
+**۵) بارگذاری رابط کاربری**
+1. در بخش **Serverless → Mini App Files** فایل `index.html` ریشه‌ی پروژه را بارگذاری کن.
+2. مطمئن شو فایل به‌عنوان صفحه‌ی اصلی Mini App یعنی `index.html` قرار گرفته است.
+3. آدرس برنامه از قالب `https://app<APP_ID>.tgcloud.ai/` ساخته می‌شود.
 
-```bash
-npx wrangler deploy --config worker/wrangler.toml
-npx wrangler secret put TELEGRAM_BOT_TOKEN --config worker/wrangler.toml
-```
+**۶) اعمال ساختار دیتابیس**
+به بخش **Serverless → Database** برو. تعریف جدول‌ها باید از `schema.js` ثبت شده باشد؛ تغییرات Schema را بررسی و گزینه‌ی Apply / Save یا اجرای Migration را بزن تا جدول‌ها ساخته شوند. تا قبل از اعمال Schema، endpointها نمی‌توانند داده‌ها را ذخیره کنند.
 
-در دستور دوم، وقتی ترمینال درخواست کرد، Bot Token معمولی ساخته‌شده با BotFather را وارد کن؛ آن را داخل دستور یا فایل ننویس.
+**۷) ساخت Worker زمان‌بندی‌شده در Cloudflare**
+این Worker هر دقیقه endpoint داخلی تلگرام را صدا می‌زند تا آلارم‌ها بررسی شوند.
 
-**۵) ساخت و انتشار Mini App**
-1. ابتدا فایل `tgcloud/lib/config.js` را باز کن و `APP_ID` در آدرس `MINI_APP_URL` را با App ID خودت جایگزین کن.
-2. در ترمینال، دستورات زیر را به ترتیب اجرا کن. هر جا ابزار توکن خواست، توکن CLI مربوط به TGCLOUD را وارد کن:
+1. وارد [داشبورد Cloudflare](https://dash.cloudflare.com/) شو و از **Workers & Pages** یک Worker جدید بساز.
+2. فایل [worker/src/index.js](https://github.com/sarenkaido/trade-panel/blob/Main/worker/src/index.js) را باز کن، کل محتوایش را در **Edit code** جایگزین کد نمونه کن.
+3. Compatibility date را روی `2026-11-01` یا جدیدتر قرار بده.
+4. در **Settings → Variables and Secrets** یک متغیر متنی به نام `TGCLOUD_APP_URL` بساز و آدرس واقعی برنامه، مثل `https://app123456.tgcloud.ai`، را در آن قرار بده.
+5. یک Secret به نام `TELEGRAM_BOT_TOKEN` بساز و Bot Token معمولی BotFather را در آن وارد کن.
+6. در **Settings → Triggers → Cron Triggers** عبارت `* * * * *` را اضافه کن.
+7. Worker را Deploy کن.
 
-```bash
-npm run build
-npx tgcloud fetch
-npx tgcloud push
-npx tgcloud migrate --yes
-```
+**۸) تنظیم دکمه‌ی ورود و آزمایش**
+1. در تنظیمات BotFather، آدرس Mini App خودت را به‌عنوان Main Mini App یا Menu Button ثبت کن.
+2. ربات را باز کن و Start بزن؛ پیام ربات باید دکمه‌ی «باز کردن پنل هشدار قیمت» را نمایش بدهد.
+3. دکمه را بزن و بررسی کن پنل داخل تلگرام باز شود.
+4. یک آلارم آزمایشی بساز و پس از یک دقیقه وضعیت آن را بررسی کن.
 
-3. اگر `tgcloud fetch` در اولین نصب اعلام کرد هنوز نسخه‌ای برای دریافت وجود ندارد، پیام خطا را بررسی کن؛ در صورت نیاز اولین انتشار را با راهنمای رسمی TGCLOUD انجام بده و سپس مراحل بعدی را ادامه بده.
-4. آدرس Mini App از نوع `https://app<APP_ID>.tgcloud.ai/` است. در BotFather آن را به‌عنوان آدرس Mini App / دکمه‌ی منوی ربات تنظیم کن.
+> **نکته:** رابط گرافیکی BotFather برای ویرایش ماژول‌ها، دیتابیس و Mini App Files در مستندات رسمی Telegram Serverless معرفی شده است. این مسیر دستی است و باید فایل‌ها را خودت در ماژول‌های هم‌نام کپی کنی؛ اگر می‌خواهی فایل‌ها خودکار همگام و منتشر شوند، روش CLI یا GitHub Actions ساده‌تر است.
 
-**۶) آزمایش**
-- ربات را باز کن و Start بزن.
-- Mini App را از دکمه‌ی منو باز کن.
-- یک آلارم آزمایشی بساز و وضعیت بررسی دوره‌ای را کنترل کن.
-
-**نکته مهم درباره نصب کاملاً گرافیکی تلگرام:** پنل BotFather و Cloudflare داشبورد گرافیکی دارند، اما Telegram Serverless در حال حاضر برای انتشار فایل‌های `tgcloud/` و خروجی ساخته‌شده‌ی Mini App از CLI استفاده می‌کند. بارگذاری دستی این پوشه‌ها از طریق یک فرم وب یا ویرایشگر Cloudflare جایگزین `tgcloud push` نیست؛ چون کد سمت سرور و دیتابیس روی زیرساخت Telegram Serverless اجرا می‌شوند.
-
-**منابع رسمی:** [Cloudflare — ویرایش و انتشار Worker از داشبورد](https://developers.cloudflare.com/workers/)、[Telegram Serverless — راهنمای CLI و انتشار Mini App](https://core.telegram.org/bots/serverless).
+**منابع رسمی:** [Telegram Serverless — مدیریت پروژه از BotFather و CLI](https://core.telegram.org/bots/serverless)، [Cloudflare — ویرایش و انتشار Worker از داشبورد](https://developers.cloudflare.com/workers/).
 
 ### انتشار نسخه‌های بعدی
 
