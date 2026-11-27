@@ -19,100 +19,72 @@
 
 ---
 
-## راه‌اندازی (قدم به قدم)
+## انتخاب محل استفاده و راه‌اندازی
 
-نیاز داری: یک حساب **Cloudflare** (رایگان) و یک **ربات تلگرام**. دو راه برای دیپلوی هست؛ **یکی** را انجام بده.
+**اول تصمیم بگیر پنل را کجا می‌خواهی استفاده کنی.** لازم نیست هر دو نسخه را نصب کنی؛ هر مسیر مستقل است و فقط همان زیرساختی را راه‌اندازی می‌کنی که لازم داری.
 
-### راه ۱ — با داشبورد Cloudflare (ساده‌ترین، بدون نصب چیزی)
+<details>
+<summary><strong>گزینه ۱ — فقط نسخه وب روی Cloudflare Worker</strong> (مناسب استفاده با مرورگر)</summary>
 
-**الف) ساخت KV (جای ذخیره‌ی اطلاعات)**
-1. وارد [dash.cloudflare.com](https://dash.cloudflare.com) شو.
-2. منوی چپ: **Storage & Databases ← KV**.
-3. **‏Create Instance** (یا Create namespace) را بزن، اسمش را `alerts` بگذار و بساز.
+در این حالت پنل به شکل یک سایت مستقل باز می‌شود؛ با آدرس اختصاصی Worker در مرورگر کامپیوتر یا گوشی. نیازی به Telegram Mini App یا سرویس TGCLOUD نداری.
 
-**ب) ساخت ورکر**
-1. منوی چپ: **Workers & Pages ← Create ← Create Worker**.
-2. اسمش را بنویس (مثلاً `alert`) و **Deploy** را بزن.
-3. **‏Edit code** را بزن، همه‌ی کد داخل ادیتور را پاک کن.
-4. فایل [`worker.js`](worker.js) را از همین ریپو باز کن، **Raw** را بزن، همه‌اش را کپی کن و در ادیتور بچسبان.
-5. **‏Deploy** را بزن.
+**نیازمندی‌ها**
+- حساب Cloudflare
+- یک KV Namespace برای ذخیره اطلاعات
+- GitHub repository از همین پروژه
 
-**پ) وصل کردن KV**
-1. صفحه‌ی ورکر ← **Settings ← Bindings ← Add ← KV namespace**.
-2. اسم متغیر دقیقاً: `ALERTS_KV` — و KV که ساختی (`alerts`) را انتخاب کن ← **Save**.
+**مراحل راه‌اندازی**
+1. در Cloudflare از بخش **Storage & Databases → KV** یک Namespace بساز و شناسه (ID) آن را بردار.
+2. در Cloudflare از **My Profile → API Tokens** یک API Token با دسترسی ویرایش Workers بساز.
+3. در GitHub مخزن پروژه‌ات را باز کن و به **Settings → Secrets and variables → Actions** برو. این مقادیر را اضافه کن:
+   - Secret با نام **CLOUDFLARE_API_TOKEN**
+   - Secret با نام **CLOUDFLARE_ACCOUNT_ID**
+   - Secret با نام **KV_NAMESPACE_ID**
+   - (اختیاری) Secret با نام **D1_DATABASE_ID**، اگر دیتابیس D1 ساخته‌ای.
+4. به تب **Actions → Deploy Trade Panel → Run workflow** برو.
+5. در قسمت مقصد، **فقط نسخه وب — Cloudflare Worker** را انتخاب کن و workflow را اجرا کن.
+6. بعد از موفقیت، آدرس Worker را در خروجی Cloudflare یا بخش Workers داشبورد ببین و باز کن.
 
-**ت) چک خودکار هر دقیقه**
-1. **‏Settings ← Trigger Events** (یا **Triggers**) ← **Add ← Cron Trigger**.
-2. بنویس: `* * * * *` ← **Save**.
+**بعد از نصب:** ثبت‌نام و ورود با ایمیل و رمز از داخل سایت انجام می‌شود. اگر می‌خواهی اعلان‌ها را در تلگرام دریافت کنی، در تنظیمات خود پنل یک ربات بساز/وصل کن؛ این فقط برای ارسال اعلان است و پنل همچنان وب‌سایت باقی می‌ماند.
 
-تمام! آدرس ورکر (مثل `alert.xxxx.workers.dev`) سایت توست.
+</details>
 
-### راه ۲ — با wrangler (ترمینال)
+<details>
+<summary><strong>گزینه ۲ — نسخه Telegram Mini App</strong> (مناسب استفاده مستقیم داخل تلگرام)</summary>
 
-‏Node.js نصب باشد. بعد:
+در این حالت کاربر پنل را از داخل ربات تلگرام باز می‌کند؛ ورود با حساب تلگرام انجام می‌شود. این مسیر علاوه بر خود Mini App به سرویس TGCLOUD و یک Worker زمان‌بندی‌شده در Cloudflare برای بررسی آلارم‌ها نیاز دارد.
 
-<div dir="ltr">
+**نیازمندی‌ها**
+- حساب تلگرام و ربات ساخته‌شده با [@BotFather](https://t.me/BotFather)
+- حساب Cloudflare
+- حساب/پروژه TGCLOUD و توکن دسترسی آن
+- GitHub repository از همین پروژه
 
-```bash
-git clone https://github.com/sarenkaido/trade-panel
-cd trade-panel
-npx wrangler login
-npx wrangler kv namespace create ALERTS_KV
-```
+**مراحل راه‌اندازی**
+1. در تلگرام به [@BotFather](https://t.me/BotFather) برو، یک ربات بساز و Bot Token را نگه دار.
+2. پروژه Telegram Serverless را در TGCLOUD بساز/انتخاب کن و توکن دسترسی پروژه را بردار.
+3. در Cloudflare یک API Token با دسترسی ویرایش Workers بساز و Account ID را بردار.
+4. در GitHub به **Settings → Secrets and variables → Actions** برو و این مقادیر را اضافه کن:
+   - Secret با نام **TGCLOUD_TOKEN**
+   - Secret با نام **CLOUDFLARE_API_TOKEN**
+   - Secret با نام **TELEGRAM_BOT_TOKEN** (توکن ربات BotFather)
+   - Secret یا Variable با نام **CLOUDFLARE_ACCOUNT_ID**
+5. به **Actions → Deploy Trade Panel → Run workflow** برو.
+6. مقصد **نسخه تلگرام — Telegram Mini App** را انتخاب و workflow را اجرا کن. این انتخاب، Mini App را build و منتشر می‌کند، schema دیتابیس TGCLOUD را اعمال می‌کند و Worker بررسی دوره‌ای آلارم‌ها را روی Cloudflare منتشر می‌کند.
+7. پس از موفقیت انتشار، در تلگرام رباتت را باز کن و **Start** را بزن؛ دکمه‌ی باز کردن پنل، Mini App را اجرا می‌کند.
 
-</div>
+**توجه:** برای این مسیر، Cloudflare Worker نسخه وب (گزینه ۱) دیپلوی نمی‌شود. Cloudflare فقط میزبان زمان‌بندی بررسی آلارم‌هاست؛ رابط کاربری داخل تلگرام اجرا می‌شود.
 
-- ‏`login` مرورگر را باز می‌کند؛ **Allow** را بزن.
-- دستور آخر یک `id` چاپ می‌کند. آن را در فایل `wrangler.toml` جای `id` بگذار (و اگر خواستی `name` را به اسم دلخواهت عوض کن).
+</details>
 
-بعد دیپلوی:
+### انتخاب مقصد در هر بار انتشار
 
-<div dir="ltr">
+هر زمان خواستی نسخه جدیدی منتشر کنی، دوباره از **GitHub → Actions → Deploy Trade Panel → Run workflow** مقصد دلخواهت را انتخاب کن. گزینه‌ها روشن و مستقل‌اند:
 
-```bash
-npx wrangler deploy
-```
+- **فقط نسخه وب — Cloudflare Worker:** فقط سایت روی Worker منتشر می‌شود.
+- **نسخه تلگرام — Telegram Mini App:** فقط Mini App و Worker زمان‌بندی مخصوص آن منتشر می‌شوند.
 
-</div>
-
-کد، KV و Cron همه از `wrangler.toml` خوانده می‌شوند.
-
-دفعه‌های بعد که کد عوض شد: `git pull` و دوباره `npx wrangler deploy`.
-
-### (اختیاری) دیپلوی خودکار با GitHub
-اگر ریپو را در حساب خودت داری، می‌توانی هر پوش را خودکار دیپلوی کنی:
-1. در Cloudflare یک **API Token** با قالب **Edit Cloudflare Workers** بساز (My Profile ← API Tokens).
-2. در GitHub: ریپو ← **Settings ← Secrets and variables ← Actions ← New repository secret** و این دو را بساز:
-   - ‏`CLOUDFLARE_API_TOKEN` = توکن
-   - ‏`CLOUDFLARE_ACCOUNT_ID` = شناسه‌ی حساب (در داشبورد Cloudflare، صفحه‌ی Workers، سمت راست)
-   - ‏`KV_NAMESPACE_ID` = شناسه‌ی KV (در داشبورد: Storage & Databases ← KV)
-3. از این به بعد با هر تغییر `worker.js` در شاخه‌ی پیش‌فرض (default) ریپو، دیپلوی خودکار انجام می‌شود. نتیجه در تب **Actions** است. دیپلوی دستی: Actions ← **Deploy to Cloudflare** ← **Run workflow**.
-
----
-
-## اولین استفاده
-
-### ۱) ثبت‌نام
-1. آدرس سایت را باز کن؛ صفحه‌ی ثبت‌نام می‌آید.
-2. ایمیل و رمز (حداقل ۸ کاراکتر) را بزن.
-3. بار اول یک فیلد **کلید API سرویس Resend** هم می‌آید. در [resend.com](https://resend.com) رایگان ثبت‌نام کن، یک API key بساز و آنجا بگذار. (بدون دامنه‌ی تاییدشده، کد فقط به ایمیلِ همان حساب Resend می‌رسد؛ پس با همان ایمیل ثبت‌نام کن.)
-4. کد ۶ رقمی را از ایمیل (پوشه‌ی اسپم را هم ببین) وارد کن. حسابت ساخته می‌شود.
-
-> **زود ثبت‌نام کن!** تا وقتی حساب ساخته نشده، هر کسی که آدرس را بداند می‌تواند ثبت‌نام کند. برای قفل کردن کامل، متغیر `OWNER_EMAIL` را با ایمیل خودت بگذار (Settings ← Variables).
-
-رمزت را فراموش کردی؟ «رمز را فراموش کردم» را بزن؛ کد به ایمیل می‌آید.
-
-### ۲) وصل کردن ربات تلگرام
-1. در تلگرام با `@BotFather` یک ربات بساز و **توکن** را بردار.
-2. در سایت: ⚙️ تنظیمات (سه تب دارد: «اعلان‌ها»، «لاگ»، «حساب») ← تب «اعلان‌ها» ← بخش «تلگرام» ← توکن را بچسبان ← «ثبت توکن».
-3. «باز کردن ربات در تلگرام» را بزن و در تلگرام **Start** را بزن.
-4. به سایت برگرد و «تشخیص چت» را بزن. پیام تایید می‌آید.
-5. برای اطمینان «تست تلگرام و ایمیل» را بزن.
-
-### ۳) ساخت آلارم
-دکمه‌ی **＋ آلارم جدید** را بزن، کوین (مثل `BTC`) و هدف را بنویس و ذخیره کن. تمام!
-
----
+با push کردن کد، هیچ‌کدام از مقصدها خودکار منتشر نمی‌شوند؛ بنابراین انتخاب نهایی همیشه دست خودت است. هر دو نسخه می‌توانند جداگانه فعال باشند، اما برای استفاده فقط یکی را لازم داری.
 
 ## سرعت و ظرفیت (اختیاری، پیشنهادی): دیتابیس D1
 
@@ -200,23 +172,11 @@ Free, open source (MIT) and runs on **your own** infrastructure — no central s
 
 ---
 
-## بکاپ کامل و انتخاب مقصد دیپلوی
+## بکاپ کامل
 
-از بخش «بکاپ و پشتیبانی» می‌توانی فایل JSON بگیری و آن را در هر دو نسخه‌ی سایت و Telegram Mini App بازیابی کنی. بکاپ شامل آلارم‌ها، دسته‌بندی‌ها، واچ‌لیست، سناریوها، پوزیشن‌ها، استراتژی‌ها، تسک‌ها، تب‌های سفارشی، زبان و تنظیمات محلی مرورگر (ماشین‌حساب، فیلترها، تم و تب فعال) است.
+از بخش «بکاپ و پشتیبانی» می‌توانی فایل JSON بگیری و آن را بین نسخه وب و Telegram Mini App جابه‌جا کنی. بکاپ شامل آلارم‌ها، دسته‌بندی‌ها، واچ‌لیست، سناریوها، پوزیشن‌ها، استراتژی‌ها، تسک‌ها، تب‌های سفارشی، زبان و تنظیمات محلی مرورگر (ماشین‌حساب، فیلترها، تم و تب فعال) است.
 
-- فایل بکاپ بین نسخه‌ی سایت و Mini App قابل جابه‌جایی است.
+- فایل بکاپ بین نسخه وب و Mini App قابل جابه‌جایی است.
 - اطلاعات ورود، رمز عبور، توکن ربات و کلیدهای API عمداً داخل بکاپ قرار نمی‌گیرند.
 - ایمیل تنظیم‌شده منتقل می‌شود، اما بعد از بازیابی وضعیت تأیید آن باید دوباره بررسی شود.
 - قبل از بازیابی، از اطلاعات مقصد نیز بکاپ بگیر؛ بازیابی داده‌های مقصد را جایگزین می‌کند.
-
-### انتخاب مقصد دیپلوی از GitHub Actions
-
-در GitHub به **Actions → Deploy Trade Panel → Run workflow** برو و مقصد را انتخاب کن:
-
-- **cloudflare-worker**: نسخه‌ی وب فعلی روی Cloudflare Worker منتشر می‌شود.
-- **telegram-mini-app**: سورس Mini App ساخته و روی Telegram Serverless منتشر می‌شود و Worker زمان‌بندی آلارم Mini App نیز به‌روزرسانی می‌شود.
-
-برای مقصد Mini App این Secrets/Variables باید در GitHub تنظیم شده باشند: `TGCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` و `TELEGRAM_BOT_TOKEN`. برای مقصد Cloudflare Worker نیز `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` و `KV_NAMESPACE_ID` لازم‌اند؛ `D1_DATABASE_ID` اختیاری است.
-
-تغییرات `worker.js` و `wrangler.toml` در شاخه‌ی `Main` به‌صورت خودکار مقصد Cloudflare Worker را دیپلوی می‌کنند. انتشار Mini App از طریق انتخاب دستی workflow انجام می‌شود.
-
