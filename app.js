@@ -2,7 +2,7 @@ const tg = window.Telegram?.WebApp;
 tg?.ready();
 tg?.expand();
 
-const API_BASE = (import.meta?.env?.VITE_WORKER_API_URL || '').replace(/\/$/, '');
+const API_BASE = (window.WORKER_API_URL || '').replace(/\/$/, '');
 const $ = (id) => document.getElementById(id);
 const form = $('alert-form');
 let alerts = [];
