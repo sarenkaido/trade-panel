@@ -28,19 +28,13 @@ jobs:
           CF_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           D1_ID: ${{ vars.D1_DATABASE_ID }}
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          WORKER_SECRET: ${{ secrets.WORKER_API_SECRET }}
+          WORKER_URL: ${{ vars.WORKER_API_URL }}
         run: |
           set -e
-          for name in TGCLOUD_TOKEN CF_TOKEN CF_ACCOUNT D1_ID TG_TOKEN WORKER_SECRET; do
+          for name in TGCLOUD_TOKEN CF_TOKEN CF_ACCOUNT D1_ID TG_TOKEN WORKER_URL; do
             if [ -z "${!name}" ]; then echo "::error::Missing GitHub secret/variable: $name"; exit 1; fi
           done
-      - run: npm ci
-      - name: Build Mini App
-        run: npm run build
-      - name: Deploy Mini App to Telegram Serverless
-        env:
-          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
-        run: npx tgcloud push
+      - run: npm install
       - name: Set Worker configuration
         env:
           D1_ID: ${{ vars.D1_DATABASE_ID }}
@@ -63,9 +57,17 @@ jobs:
       - name: Configure Worker secrets
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          WORKER_API_SECRET: ${{ secrets.WORKER_API_SECRET }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           printf '%s' "$TELEGRAM_BOT_TOKEN" | npx wrangler secret put TELEGRAM_BOT_TOKEN --config=worker/wrangler.toml
-          printf '%s' "$WORKER_API_SECRET" | npx wrangler secret put WORKER_API_SECRET --config=worker/wrangler.toml
+      - name: Build Mini App
+        env:
+          WORKER_API_URL: ${{ vars.WORKER_API_URL }}
+        run: npm run build
+      - name: Deploy Mini App to Telegram Serverless
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: npx tgcloud push
+      - name: Apply Telegram Serverless schema
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: npx tgcloud migrate --yes
