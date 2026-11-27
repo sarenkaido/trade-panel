@@ -1,0 +1,16 @@
+{
+  "name": "telegram-price-alerts-miniapp",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "deploy:telegram": "npm run build && tgcloud push",
+    "deploy:worker": "wrangler deploy",
+    "deploy": "npm run deploy:telegram && npm run deploy:worker"
+  },
+  "devDependencies": {
+    "@tgcloud/cli": "^0.2.0",
+    "wrangler": "^4.0.0"
+  }
+}
