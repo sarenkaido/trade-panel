@@ -124,7 +124,7 @@ jobs:
             npx tgcloud run endpoints/api "{\"method\":\"DELETE\",\"path\":\"/api/$SECTION/1\"}" --ctx "$CTX"
           done
           npx tgcloud run endpoints/api '{"method":"POST","path":"/api/alerts/","body":{"coin":"BTC","direction":"long","entry":50000,"targets":[{"price":55000,"note":"CI target"}],"ch":["tg"]}}' --ctx "$CTX"
-          ALERTS=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/alerts?x=2"}' --ctx "$CTX")
+          ALERTS=$(npx tgcloud run endpoints/api '{"method":"GET","path":"/api/alerts","query":{"x":"2"}}' --ctx "$CTX")
           echo "$ALERTS"
           [[ "$ALERTS" == *'BTC'* ]] || { echo "::error::Alert create/read smoke test failed"; exit 1; }
           npx tgcloud run endpoints/api '{"method":"DELETE","path":"/api/alerts/1"}' --ctx "$CTX"
