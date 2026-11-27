@@ -936,6 +936,25 @@ async function handleApi(request, env, url) {
     const defaults = { alerts:{alerts:[],last_id:0}, cats:[], watchlist:{items:[],last_id:0}, wcats:[], scenario:{items:[],last_id:0}, scats:[], positions:{items:[],last_id:0}, pcats:[], strategies:{items:[],last_id:0}, gcats:[], tasks:{items:[],last_id:0}, kcats:[], tabs:{tabs:[]} };
     const data = {};
     for (const key of keys) data[key] = await kvGetJSON(env, key, defaults[key]);
+    // Convert pre-structured legacy notes into the same portable shape used by both clients.
+    for (const [key, kind] of [["watchlist","w"],["scenario","s"],["positions","p"],["strategies","g"],["tasks","k"]]) {
+      const current = data[key] || {};
+      if (!Array.isArray(current.items)) {
+        const old = String(current[key] || ""), items = [];
+        if (kind === "w") {
+          for (const line of old.split("\n")) {
+            const value = line.trim(); if (!value) continue;
+            const match = value.match(/^([A-Za-z0-9]{1,12})\\s*(.*)$/);
+            items.push({id:items.length+1,coin:(match?match[1]:value.slice(0,12)).toUpperCase(),note:(match?match[2]:"").slice(0,10000),cat:0});
+            if (items.length >= 300) break;
+          }
+        } else if (old.trim()) {
+          const lines = old.split("\n");
+          items.push({id:1,title:(lines[0]||"").trim().slice(0,80)||"یادداشت",text:lines.slice(1).join("\n").slice(0,20000),cat:0});
+        }
+        data[key] = {items,last_id:items.length};
+      }
+    }
     data.settings = { lang: (await kvGetJSON(env, "settings", {})).lang === "en" ? "en" : "fa" };
     return jsonRes({ format:"trade-panel-backup", version:1, createdAt:new Date().toISOString(), source:"web", data });
   }
