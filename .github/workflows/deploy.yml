@@ -26,7 +26,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-miniapp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Validate Mini App build and inline scripts
+        run: npm run build
+      - name: Validate Cloudflare Worker syntax
+        run: |
+          cp worker.js /tmp/check.mjs
+          node --check /tmp/check.mjs
+
   deploy-cloudflare-worker:
+    needs: validate-miniapp
     if: github.event_name == 'push' || inputs.target == 'cloudflare-worker'
     runs-on: ubuntu-latest
     steps:
@@ -58,6 +75,7 @@ jobs:
           command: deploy
 
   deploy-telegram-mini-app:
+    needs: validate-miniapp
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'telegram-mini-app'
     runs-on: ubuntu-latest
     steps:
