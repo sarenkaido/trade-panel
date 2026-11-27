@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "deploy:worker": "wrangler deploy --config wrangler.toml",
-    "deploy:telegram": "npm run build && tgcloud push && tgcloud migrate --yes"
+    "deploy:worker": "wrangler deploy --config wrangler.toml"
   },
   "devDependencies": {
     "@tgcloud/cli": "^0.2.0",
