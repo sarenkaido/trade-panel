@@ -13,7 +13,7 @@ async function write(userId,key,value) {
     .onConflictDoUpdate({target:[userState.userId,userState.key],set:{value:JSON.stringify(value)}}).run();
 }
 async function priceFor(symbol) {
-  const c=String(symbol||'').toUpperCase().replace(/USDT\\.P$|USDT$/,'');
+  const raw=String(symbol||'').toUpperCase();const c=raw.endsWith('USDT.P')?raw.slice(0,-6):raw.replace(/USDT$/,'');
   const perp=String(symbol||'').endsWith('.P');
   const sources=perp?[
     ['https://api.bybit.com/v5/market/tickers?category=linear&symbol='+c+'USDT',d=>d?.result?.list?.[0]?.lastPrice],
@@ -27,7 +27,7 @@ async function priceFor(symbol) {
   for(const [url,pick] of sources){try{const r=await fetch(url);if(!r.ok)continue;const n=Number(pick(await r.json()));if(Number.isFinite(n)&&n>0)return n;}catch{}}
   return null;
 }
-function directionOf(note){for(const line of String(note||'').split('\\n')){const i=line.indexOf(':');if(i>=0&&line.slice(0,i).trim()==='جهت')return line.slice(i+1).trim().toLowerCase();}return '';}
+function directionOf(note){for(const line of String(note||'').split('\n')){const i=line.indexOf(':');if(i>=0&&line.slice(0,i).trim()==='جهت')return line.slice(i+1).trim().toLowerCase();}return '';}
 
 export default async function (_input,ctx) {
   if(ctx.initData?.start_param!=='worker-cron')reject('Forbidden');
@@ -64,8 +64,8 @@ export default async function (_input,ctx) {
         if(!hit)continue;
         const lang=(await read(user.userId,'settings',{})).lang||'fa';
         const message=lang==='en'
-          ? kind+' Price alert: '+alert.coin+'\\nCurrent: '+price+'\\nTarget: '+level
-          : kind+' هشدار قیمت '+alert.coin+'\\nقیمت فعلی: '+price+'\\nقیمت هدف: '+level;
+          ? kind+' Price alert: '+alert.coin+'\nCurrent: '+price+'\nTarget: '+level
+          : kind+' هشدار قیمت '+alert.coin+'\nقیمت فعلی: '+price+'\nقیمت هدف: '+level;
         try{
           await api.sendMessage({chat_id:user.userId,text:message,disable_web_page_preview:true});
           alert.triggered=alert.triggered||[];alert.triggered.push(tid);changed=true;triggered++;
