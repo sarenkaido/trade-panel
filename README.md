@@ -100,6 +100,104 @@
 
 در این روش ورود با حساب تلگرام انجام می‌شود و ثبت‌نام ایمیلی نسخه وب لازم نیست.
 
+### نصب دستی بدون GitHub Actions
+
+اگر نمی‌خواهی مخزن را به GitHub Actions وصل کنی، می‌توانی نسخه وب را کاملاً از داشبورد Cloudflare منتشر کنی. برای Telegram Mini App نیز مراحل تنظیم سرویس‌ها گرافیکی است، اما بارگذاری کد روی Telegram Serverless در حال حاضر به ابزار خط فرمان TGCLOUD نیاز دارد؛ راهنمای آن پایین آمده است.
+
+#### روش دستی A — انتشار نسخه وب فقط با داشبورد Cloudflare
+
+**۱) ساخت KV**
+1. وارد [داشبورد Cloudflare](https://dash.cloudflare.com/) شو.
+2. از **Storage & Databases → KV** یک Namespace جدید بساز.
+3. نامی مثل `trade-panel` انتخاب کن و صفحه را باز نگه دار.
+
+**۲) ساخت Worker و وارد کردن کد**
+1. از **Workers & Pages** گزینه‌ی ساخت برنامه / Worker را انتخاب کن.
+2. یک Worker جدید بساز و وارد **Edit code** شو.
+3. در مخزن پروژه، فایل [worker.js](https://github.com/sarenkaido/trade-panel/blob/Main/worker.js) را باز کن؛ محتوای کامل فایل را کپی کن و جای کد نمونه در ویرایشگر Cloudflare قرار بده.
+4. نام Worker را ذخیره کن و در تنظیمات آن، Compatibility date را روی `2026-01-01` یا تاریخ جدیدتر قرار بده.
+
+**۳) اتصال KV**
+1. در صفحه Worker به **Settings → Bindings** برو و **Add → KV Namespace** را انتخاب کن.
+2. نام متغیر (Variable name) را دقیقاً `ALERTS_KV` بگذار.
+3. Namespace ساخته‌شده در مرحله‌ی اول را انتخاب و ذخیره کن.
+
+**۴) فعال‌کردن بررسی خودکار آلارم‌ها**
+1. به **Settings → Triggers** یا بخش **Cron Triggers** برو.
+2. یک Cron Trigger با عبارت `* * * * *` اضافه کن تا بررسی آلارم‌ها هر دقیقه اجرا شود.
+3. تغییرات را ذخیره و Worker را Deploy کن.
+
+**۵) بررسی**
+- آدرس `workers.dev` نمایش‌داده‌شده در صفحه Worker را باز کن.
+- یک حساب بساز و وارد پنل شو.
+- برای اطمینان از اجرای بررسی خودکار، در پنل به **تنظیمات → لاگ** برو و وضعیت آخرین بررسی را ببین.
+
+**اتصال اختیاری D1:** اگر می‌خواهی به‌جای KV از D1 هم استفاده کنی، دیتابیس را در Cloudflare بساز و از **Settings → Bindings → Add → D1 database** آن را با نام متغیر دقیقاً `DB` به Worker وصل کن. برای مهاجرت خودکار داده‌های قدیمی، KV را حذف نکن.
+
+> این روش فقط برای نسخه وب است. فایل `worker.js` به‌تنهایی Telegram Mini App را نصب نمی‌کند.
+
+#### روش دستی B — Telegram Mini App بدون GitHub Actions
+
+در این روش نیازی به GitHub Actions یا افزودن Secret به مخزن نیست؛ فایل‌ها روی کامپیوتر خودت آماده و با CLI رسمی TGCLOUD منتشر می‌شوند. تنظیمات BotFather و Cloudflare را می‌توانی از داشبوردهای گرافیکی انجام بدهی.
+
+**۱) دریافت پروژه و نصب ابزارها**
+1. از [صفحه پروژه](https://github.com/sarenkaido/trade-panel) گزینه‌ی **Code → Download ZIP** را بزن و فایل را از حالت فشرده خارج کن.
+2. [Node.js نسخه 22](https://nodejs.org/) را نصب کن.
+3. ترمینال را در پوشه‌ی اصلی پروژه باز کن و اجرا کن:
+
+```bash
+npm install
+```
+
+**۲) ساخت ربات و فعال‌سازی Telegram Serverless**
+1. در تلگرام [@BotFather](https://t.me/BotFather) را باز کن و با دستور `/newbot` ربات بساز.
+2. در تنظیمات همان ربات، قابلیت **Serverless** را فعال کن و از بخش دسترسی CLI، توکن پروژه را دریافت کن. این مقدار با Bot Token معمولی متفاوت است.
+3. توکن CLI را فقط روی کامپیوتر خودت نگه دار؛ آن را در فایل پروژه یا مخزن عمومی ننویس.
+
+**۳) آماده‌سازی Cloudflare**
+1. در داشبورد Cloudflare یک API Token با دسترسی ویرایش Workers بساز و Account ID را از صفحه حساب بردار.
+2. فایل `worker/wrangler.toml` را با ویرایشگر متن باز کن.
+3. خط زیر را در ابتدای فایل اضافه کن و مقدار نمونه را با Account ID خودت عوض کن:
+
+```toml
+account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+```
+
+4. در همان فایل، عبارت `APP_ID` در مقدار `TGCLOUD_APP_URL` باید با شناسه‌ی برنامه‌ی TGCLOUD جایگزین شود. این شناسه از توکن CLI که با `app` شروع می‌شود قابل تشخیص است؛ بخش عددی بعد از `app` و قبل از `:` همان App ID است.
+
+**۴) انتشار Worker زمان‌بندی آلارم‌ها**
+در ترمینال، از پوشه‌ی اصلی پروژه اجرا کن:
+
+```bash
+npx wrangler deploy --config worker/wrangler.toml
+npx wrangler secret put TELEGRAM_BOT_TOKEN --config worker/wrangler.toml
+```
+
+در دستور دوم، وقتی ترمینال درخواست کرد، Bot Token معمولی ساخته‌شده با BotFather را وارد کن؛ آن را داخل دستور یا فایل ننویس.
+
+**۵) ساخت و انتشار Mini App**
+1. ابتدا فایل `tgcloud/lib/config.js` را باز کن و `APP_ID` در آدرس `MINI_APP_URL` را با App ID خودت جایگزین کن.
+2. در ترمینال، دستورات زیر را به ترتیب اجرا کن. هر جا ابزار توکن خواست، توکن CLI مربوط به TGCLOUD را وارد کن:
+
+```bash
+npm run build
+npx tgcloud fetch
+npx tgcloud push
+npx tgcloud migrate --yes
+```
+
+3. اگر `tgcloud fetch` در اولین نصب اعلام کرد هنوز نسخه‌ای برای دریافت وجود ندارد، پیام خطا را بررسی کن؛ در صورت نیاز اولین انتشار را با راهنمای رسمی TGCLOUD انجام بده و سپس مراحل بعدی را ادامه بده.
+4. آدرس Mini App از نوع `https://app<APP_ID>.tgcloud.ai/` است. در BotFather آن را به‌عنوان آدرس Mini App / دکمه‌ی منوی ربات تنظیم کن.
+
+**۶) آزمایش**
+- ربات را باز کن و Start بزن.
+- Mini App را از دکمه‌ی منو باز کن.
+- یک آلارم آزمایشی بساز و وضعیت بررسی دوره‌ای را کنترل کن.
+
+**نکته مهم درباره نصب کاملاً گرافیکی تلگرام:** پنل BotFather و Cloudflare داشبورد گرافیکی دارند، اما Telegram Serverless در حال حاضر برای انتشار فایل‌های `tgcloud/` و خروجی ساخته‌شده‌ی Mini App از CLI استفاده می‌کند. بارگذاری دستی این پوشه‌ها از طریق یک فرم وب یا ویرایشگر Cloudflare جایگزین `tgcloud push` نیست؛ چون کد سمت سرور و دیتابیس روی زیرساخت Telegram Serverless اجرا می‌شوند.
+
+**منابع رسمی:** [Cloudflare — ویرایش و انتشار Worker از داشبورد](https://developers.cloudflare.com/workers/)、[Telegram Serverless — راهنمای CLI و انتشار Mini App](https://core.telegram.org/bots/serverless).
+
 ### انتشار نسخه‌های بعدی
 
 برای انتشار به‌روزرسانی‌ها، تغییرات را به مخزن Forkشده‌ی خودت بفرست؛ سپس از **Actions → Deploy Trade Panel → Run workflow** مقصد موردنظر را انتخاب و اجرا کن. انتشار خودکار با هر Push انجام نمی‌شود.
