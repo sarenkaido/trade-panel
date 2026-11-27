@@ -37,7 +37,7 @@ export default async function (_input,ctx) {
     const data=await read(user.userId,'alerts',{alerts:[],last_id:0});
     const alerts=Array.isArray(data.alerts)?data.alerts:[];
     const pending=alerts.filter(a=>(a.targets||[]).some(t=>!(a.triggered||[]).includes(t.id)));
-    if(!pending.length)continue;
+    if(!pending.length){await write(user.userId,'last_cron',{t:Date.now(),p:0,m:'',e:'',n:null});continue;}
     const symbols=[...new Set(pending.map(a=>a.coin))];
     const prices=new Map();
     await Promise.all(symbols.map(async s=>prices.set(s,await priceFor(s))));
@@ -73,7 +73,7 @@ export default async function (_input,ctx) {
       }
       alert.prev_price=price;alert.last_price=price;alert.last_checked=new Date().toISOString();
     }
-    if(changed||pending.length)await write(user.userId,'alerts',data);
+    if(changed||pending.length)await write(user.userId,'alerts',data);\n    await write(user.userId,'last_cron',{t:Date.now(),p:pending.length,m:'',e:failed?'Telegram notification errors':'',n:null});
   }
   return {ok:true,users:users.length,checked,triggered,failed};
 }
