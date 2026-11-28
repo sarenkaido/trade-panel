@@ -2280,7 +2280,7 @@ function drawBox(o){const box=$('#c-box');if(!o){box.innerHTML='<div class="tve"
  const L=o.dir==='long',has=o.tp!=null,H=has?290:210,dS=Math.abs(o.sp-o.en),dT=has?Math.abs(o.tp-o.en):0;
  let hT,hS;if(has){const tot=dT+dS;hT=Math.min(H-70,Math.max(70,dT/tot*H));hS=H-hT}else{hT=64;hS=H-64}
  // the profit side of a Long is the top zone; for a Short it is the bottom zone
- const hP=L?hT:hS,hL=L?hS:hT;
+ const hP=hT,hL=hS;
  const prof='<div class="tz p '+(L?'top':'bot')+(has?'':' ghost')+'" style="height:'+hP+'px"><div class="tzt">'+(has?'Target '+pf(o.tp)+' ('+cf(o.tpd,2)+'%)<small>'+(o.reward>=0?'+$':'−$')+cf(Math.abs(o.reward))+'</small>':'Target — (اختیاری)')+'</div></div>';
  const loss='<div class="tz l '+(L?'bot':'top')+'" style="height:'+hL+'px"><div class="tzt">Stop '+pf(o.sp)+' ('+cf(o.sl,2)+'%)<small>−$'+cf(o.risk)+'</small></div></div>';
  const ey=L?hP:hL;
@@ -2300,12 +2300,12 @@ function calc(){
  $('#c-msg').textContent=err;
  if(err||[cap,rk,lv,sl].some(v=>v===null)){clear(err?'':'مقادیر را وارد کنید…');return}
  const risk$=cap*rk/100,entryFeeRate=fo/100,exitFeeRate=fc/100;
- const stopDistance=Math.abs(en-sp),riskPerUnit=stopDistance+en*entryFeeRate+sp*exitFeeRate;
+ const stopDistance=dir==='long'?en-sp:sp-en,targetDistance=tp!==null?(dir==='long'?tp-en:en-tp):null,riskPerUnit=stopDistance+en*entryFeeRate+sp*exitFeeRate;
  if(!Number.isFinite(riskPerUnit)||riskPerUnit<=0){clear('فاصله و کارمزدها برای محاسبه معتبر نیستند.');return}
  const qty=risk$/riskPerUnit,not=qty*en,margin=not/lv;
  const tpd=tp!==null?Math.abs(tp-en)/en*100:null;
  const actualRisk=qty*(stopDistance+en*entryFeeRate+sp*exitFeeRate);
- const targetGross=tp!==null?qty*Math.abs(tp-en):null,targetFees=tp!==null?qty*(en*entryFeeRate+tp*exitFeeRate):null;
+ const targetGross=tp!==null?qty*targetDistance:null,targetFees=tp!==null?qty*(en*entryFeeRate+tp*exitFeeRate):null;
  const reward=tp!==null?targetGross-targetFees:null,rr=reward!==null?reward/actualRisk:null;
  const liq=lv>1||dir==='short'?(dir==='long'?en*(1-1/lv):en*(1+1/lv)):null;
  set('#c-val',cf(margin));$('#c-val').classList.add('on');set('#c-not','$'+cf(not));set('#c-qty',pf(qty));set('#c-rsk','-$'+cf(actualRisk));
