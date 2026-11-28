@@ -932,7 +932,7 @@ function drawBox(o){const box=$('#c-box');if(!o){box.innerHTML='<div class="tve"
  let hT,hS;if(has){const tot=dT+dS;hT=Math.min(H-70,Math.max(70,dT/tot*H));hS=H-hT}else{hT=64;hS=H-64}
  // the profit side of a Long is the top zone; for a Short it is the bottom zone
  const hP=L?hT:hS,hL=L?hS:hT;
- const prof='<div class="tz p '+(L?'top':'bot')+(has?'':' ghost')+'" style="height:'+hP+'px"><div class="tzt">'+(has?'Target '+pf(o.tp)+' ('+cf(o.tpd,2)+'%)<small>+$'+cf(o.reward)+'</small>':'Target — (اختیاری)')+'</div></div>';
+ const prof='<div class="tz p '+(L?'top':'bot')+(has?'':' ghost')+'" style="height:'+hP+'px"><div class="tzt">'+(has?'Target '+pf(o.tp)+' ('+cf(o.tpd,2)+'%)<small>'+(o.reward>=0?'+$':'−$')+cf(Math.abs(o.reward))+'</small>':'Target — (اختیاری)')+'</div></div>';
  const loss='<div class="tz l '+(L?'bot':'top')+'" style="height:'+hL+'px"><div class="tzt">Stop '+pf(o.sp)+' ('+cf(o.sl,2)+'%)<small>−$'+cf(o.risk)+'</small></div></div>';
  const ey=L?hP:hL;
  box.innerHTML=(L?prof+loss:loss+prof)+'<div class="tzm" style="top:'+ey+'px"><span>'+(L?'Long':'Short')+' · Entry '+pf(o.en)+(o.rr!=null?' · R/R <b>'+cf(o.rr,2)+'</b>':'')+'</span></div>'}
